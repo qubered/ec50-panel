@@ -114,6 +114,12 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
 - **The panel's CPLD is field-programmable over the same link.** Nothing here
   goes near that path, and nothing should.
 
+## Companion
+
+Design for the Bitfocus Companion Satellite integration is in
+[docs/COMPANION.md](docs/COMPANION.md) — four surfaces, per-row pages, the T-bar
+as a Companion variable. Not yet implemented.
+
 ## Status
 
 Working and confirmed on hardware: displays, colour, LEDs, all 82 buttons,
