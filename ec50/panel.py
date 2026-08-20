@@ -76,9 +76,13 @@ class EC50:
 
     @classmethod
     def open(cls, backend: str | None = None, index: int | None = None,
-             skew: int | None = None) -> "EC50":
-        """Open the panel. Backend defaults to D2XX on Windows, pyftdi elsewhere."""
-        return cls(open_transport(backend, index), skew=skew)
+             skew: int | None = None, controller: str | None = None) -> "EC50":
+        """Open the panel. Backend defaults to D2XX on Windows, pyftdi elsewhere.
+
+        `controller` is a "host:port" for a panel reached over the network -
+        an emulator, usually - and selects the `net` backend on its own.
+        """
+        return cls(open_transport(backend, index, controller), skew=skew)
 
     @property
     def backend(self) -> str:

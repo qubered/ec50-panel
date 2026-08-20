@@ -1,6 +1,6 @@
-"""USB transport for the EC-50, with a backend per platform.
+"""Transport for the EC-50, with a backend per platform.
 
-The panel is an FT232H in MPSSE mode. Two ways to reach it:
+The panel is an FT232H in MPSSE mode. Three ways to reach it:
 
   d2xx    FTDI's own driver, via the `ftd2xx` package. The right choice on
           Windows, because Barco's installer already binds ftdibus.sys to
@@ -12,17 +12,49 @@ The panel is an FT232H in MPSSE mode. Two ways to reach it:
           absent from ftdi_sio's table - so libusb gets the device directly
           once udev grants access. Install 71-barcoipusb.rules for that.
 
+  net     the same MPSSE byte stream over TCP, which is how you reach the
+          emulator (`python -m ec50 emulate`) or a panel shared from another
+          machine. Say which one with `controller="host:port"`, the
+          --controller argument, or $EC50_CONTROLLER.
+
 Everything above this layer is plain byte manipulation and platform-neutral.
 """
 
 from __future__ import annotations
 
+import os
+import socket
 import sys
 import time
 
 VID = 0x0600
 PID = 0x0336
 PRODUCT_STRINGS = ("show console", "ec show")   # D2XX reports the EEPROM string
+
+DEFAULT_CONTROLLER = "127.0.0.1:16650"
+CONTROLLER_ENV = "EC50_CONTROLLER"
+
+
+def parse_controller(spec: str | None) -> tuple[str, int]:
+    """`host:port`, `host`, `:port` or None -> (host, port).
+
+    None falls back to $EC50_CONTROLLER and then to the emulator's own default.
+    """
+    spec = spec or os.environ.get(CONTROLLER_ENV) or DEFAULT_CONTROLLER
+    spec = spec.strip()
+    if spec.startswith("["):                    # [::1]:16650
+        host, _, rest = spec[1:].partition("]")
+        port = rest.lstrip(":")
+    elif spec.count(":") == 1:
+        host, _, port = spec.partition(":")
+    else:
+        host, port = spec, ""
+    default_host, default_port = DEFAULT_CONTROLLER.split(":")
+    try:
+        port = int(port) if port else int(default_port)
+    except ValueError:
+        raise TransportError(f"not a controller address: {spec!r}")
+    return host or default_host, port
 
 
 class TransportError(RuntimeError):
@@ -59,7 +91,7 @@ class Transport:
 class D2xxTransport(Transport):
     name = "d2xx"
 
-    def __init__(self, index=None):
+    def __init__(self, index=None, controller=None):
         try:
             import ftd2xx
         except ImportError:
@@ -121,7 +153,7 @@ class D2xxTransport(Transport):
 class PyFtdiTransport(Transport):
     name = "pyftdi"
 
-    def __init__(self, index=None):
+    def __init__(self, index=None, controller=None):
         try:
             from pyftdi.ftdi import Ftdi
         except ImportError:
@@ -174,7 +206,94 @@ class PyFtdiTransport(Transport):
 
 # ---------------------------------------------------------------------------
 
-BACKENDS = {"d2xx": D2xxTransport, "pyftdi": PyFtdiTransport}
+
+class NetTransport(Transport):
+    """The MPSSE stream over TCP. Talks to `python -m ec50 emulate`.
+
+    The wire is identical to USB, so nothing above this layer can tell the
+    difference - which is the whole point of the emulator.
+    """
+
+    name = "net"
+    timeout = 2.0
+
+    def __init__(self, index=None, controller=None):
+        self.host, self.port = parse_controller(controller)
+        try:
+            self.sock = socket.create_connection((self.host, self.port), timeout=5.0)
+        except OSError as e:
+            raise TransportError(
+                f"could not reach a controller at {self.host}:{self.port} ({e}).\n"
+                "Start the emulator with `python -m ec50 emulate`, or point "
+                "--controller at the right host and port.")
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.settimeout(self.timeout)
+        self._rx = bytearray()
+
+        # A panel takes one host at a time; a busy one hangs up immediately.
+        self.sock.settimeout(0.25)
+        try:
+            if self.sock.recv(1, socket.MSG_PEEK) == b"":
+                raise TransportError(
+                    f"{self.host}:{self.port} already has a host attached - "
+                    "the panel accepts one at a time.")
+        except socket.timeout:
+            pass
+        except OSError:
+            pass
+        self.sock.settimeout(self.timeout)
+
+    def enter_mpsse(self):
+        pass                    # there is no bit-bang mode to leave
+
+    def write(self, data: bytes) -> None:
+        try:
+            self.sock.sendall(bytes(data))
+        except OSError as e:
+            raise TransportError(f"controller link lost ({e})")
+
+    def read(self, count: int) -> bytes:
+        deadline = time.time() + self.timeout
+        while len(self._rx) < count and time.time() < deadline:
+            try:
+                chunk = self.sock.recv(65536)
+            except socket.timeout:
+                break
+            except OSError as e:
+                raise TransportError(f"controller link lost ({e})")
+            if not chunk:
+                raise TransportError("controller closed the connection")
+            self._rx += chunk
+        out = bytes(self._rx[:count])
+        del self._rx[:count]
+        return out
+
+    def flush_input(self) -> None:
+        self._rx.clear()
+        self.sock.setblocking(False)
+        try:
+            while self.sock.recv(65536):
+                pass
+        except (BlockingIOError, socket.timeout):
+            pass
+        except OSError:
+            pass
+        finally:
+            self.sock.setblocking(True)
+            self.sock.settimeout(self.timeout)
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+
+BACKENDS = {"d2xx": D2xxTransport, "pyftdi": PyFtdiTransport,
+            "net": NetTransport}
+BACKENDS["emulator"] = NetTransport      # the name most people will reach for
 
 
 def default_backend() -> str:
@@ -182,21 +301,34 @@ def default_backend() -> str:
     return "d2xx" if sys.platform.startswith("win") else "pyftdi"
 
 
-def open_transport(backend: str | None = None, index: int | None = None) -> Transport:
-    """Open the panel, falling back to the other backend if the first is absent."""
-    order = [backend] if backend else [default_backend()]
-    if not backend:
-        order += [b for b in BACKENDS if b not in order]
+def open_transport(backend: str | None = None, index: int | None = None,
+                   controller: str | None = None) -> Transport:
+    """Open the panel, falling back to the other backend if the first is absent.
+
+    A `controller` address implies the network backend, so pointing at an
+    emulator needs nothing else.
+    """
+    if backend is None and (controller or os.environ.get(CONTROLLER_ENV)):
+        backend = "net"
+    if backend:
+        order = [backend]
+    else:
+        # USB first, then the network, so an emulator left running never
+        # silently stands in for a panel that is plugged in.
+        order = [default_backend()]
+        order += [b for b in ("d2xx", "pyftdi", "net") if b not in order]
 
     errors = []
     for name in order:
         cls = BACKENDS.get(name)
         if cls is None:
-            raise TransportError(f"unknown backend {name!r}; choose from {list(BACKENDS)}")
+            raise TransportError(f"unknown backend {name!r}; choose from {sorted(BACKENDS)}")
         try:
-            t = cls(index)
+            t = cls(index, controller)
             t.enter_mpsse()
             return t
         except TransportError as e:
+            if len(order) == 1:
+                raise                   # only one candidate, so say what it said
             errors.append(f"{name}: {e}")
     raise TransportError("could not open the EC-50.\n  " + "\n  ".join(errors))

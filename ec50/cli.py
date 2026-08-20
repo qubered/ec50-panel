@@ -8,9 +8,14 @@
     python -m ec50 watch                    key events and T-bar
     python -m ec50 test                     press a key, it lights up
     python -m ec50 vegas                    colour and LED light show
+    python -m ec50 emulate                  a whole EC-50 in a browser
 
 Close the Event Master Toolset first - the panel takes one host at a time.
-Add --init after a power cycle. Add --backend d2xx|pyftdi to force one.
+Add --init after a power cycle. Add --backend d2xx|pyftdi|net to force one.
+
+No hardware? Run `emulate` in one terminal and add --controller HOST:PORT to
+everything else; the wire is identical, so nothing above the transport can
+tell which one it is talking to.
 """
 
 import argparse
@@ -21,7 +26,7 @@ import time
 from . import protocol as P
 from .panel import EC50
 from .protocol import Colour, Led
-from .transport import TransportError, default_backend
+from .transport import DEFAULT_CONTROLLER, TransportError, default_backend
 
 
 def short_label(name):
@@ -34,7 +39,9 @@ def short_label(name):
 
 
 def cmd_info(panel, args):
-    print(f"backend        : {panel.backend}  (default here: {default_backend()})")
+    where = getattr(panel.io, "host", None)
+    print(f"backend        : {panel.backend}  (default here: {default_backend()})"
+          + (f"  via {where}:{panel.io.port}" if where else ""))
     print(f"platform       : {sys.platform}")
     print(f"cells          : {P.NUM_CELLS} x {P.CELL_W}x{P.CELL_H} 1bpp")
     print(f"buttons        : {len(P.BUTTON_INFO)}")
@@ -135,29 +142,80 @@ def cmd_vegas(panel, args):
         print("\npanel cleared. stopped.")
 
 
+def cmd_emulate(args):
+    """Run the software panel. Takes no hardware and gives the driver a target."""
+    import webbrowser
+    from .emulator import Emulator
+
+    host, port = args.bind, args.web_port
+    emu = Emulator(device_port=args.device_port, web_port=port, host=host,
+                   verbose=args.verbose).start()
+    print(f"EC-50 emulator")
+    print(f"  front panel : {emu.url}")
+    print(f"  controller  : {emu.controller}   "
+          f"({P.NUM_CELLS} cells, {len(P.BUTTON_INFO)} buttons, 16-bit T-bar)")
+    print()
+    print(f"  drive it    : python -m ec50 grid --controller {emu.controller}")
+    print(f"                export EC50_CONTROLLER={emu.controller}")
+    print()
+    print("Ctrl+C to stop.")
+    if not args.no_browser:
+        try:
+            webbrowser.open(emu.url)
+        except Exception:
+            pass
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        emu.stop()
+        print("\nstopped.")
+
+
 COMMANDS = {
     "info": cmd_info, "clear": cmd_clear, "text": cmd_text, "grid": cmd_grid,
     "watch": cmd_watch, "test": cmd_test, "vegas": cmd_vegas,
 }
+STANDALONE = {"emulate": cmd_emulate}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=sorted(COMMANDS))
+    ap.add_argument("command", choices=sorted(COMMANDS) + sorted(STANDALONE))
     ap.add_argument("labels", nargs="*", help="labels for the `text` command")
-    ap.add_argument("--backend", choices=("d2xx", "pyftdi"),
-                    help="force a USB backend instead of the platform default")
+    ap.add_argument("--backend", choices=("d2xx", "pyftdi", "net", "emulator"),
+                    help="force a transport instead of the platform default")
     ap.add_argument("--index", type=int, help="device index if several are attached")
+    ap.add_argument("--controller", metavar="HOST:PORT",
+                    help="reach the panel over the network instead of USB - an "
+                         f"emulator, usually (default {DEFAULT_CONTROLLER}, "
+                         "or $EC50_CONTROLLER)")
     ap.add_argument("--init", action="store_true",
                     help="send LCD controller setup (needed after a power cycle)")
     ap.add_argument("--no-skew", action="store_true",
                     help="do not compensate the panel's right-half row skew")
     ap.add_argument("--fps", type=int, default=8, help="vegas frame rate")
+
+    emu = ap.add_argument_group("emulate")
+    emu.add_argument("--bind", default="127.0.0.1",
+                     help="interface for both emulator listeners")
+    emu.add_argument("--web-port", type=int, default=8050,
+                     help="port for the front panel GUI")
+    emu.add_argument("--device-port", type=int, default=16650,
+                     help="port the driver connects to")
+    emu.add_argument("--no-browser", action="store_true",
+                     help="do not open a browser window")
+    emu.add_argument("--verbose", action="store_true", help="log web requests")
     args = ap.parse_args()
 
+    if args.command in STANDALONE:
+        return STANDALONE[args.command](args)
+
     try:
-        panel = EC50.open(args.backend, args.index, skew=0 if args.no_skew else None)
+        panel = EC50.open(args.backend, args.index,
+                          skew=0 if args.no_skew else None,
+                          controller=args.controller)
     except TransportError as e:
         sys.exit(f"error: {e}")
 

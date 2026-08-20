@@ -12,6 +12,23 @@ The protocol was reverse engineered from USB captures of Barco's Event Master
 Toolset and confirmed on hardware. See [docs/PROTOCOL.md](docs/PROTOCOL.md) for
 the full specification.
 
+## No hardware? Run the emulator
+
+A software EC-50 with the front panel in a browser — same buttons, same 45
+displays, same LEDs, same T-bar — answering the same wire protocol, so the
+driver cannot tell the difference.
+
+```bash
+python -m ec50 emulate                                  # http://127.0.0.1:8050/
+python -m ec50 grid --controller 127.0.0.1:16650        # in another terminal
+```
+
+It implements the hardware primitives only: pixels, backlight bytes, LED bits,
+a key FIFO and the T-bar's ADC. Every documented trap — the latch, the double
+buffer, the row skew, the header bytes, the one-transaction read lag — is in
+there, with a switch for each so you can see what it was doing.
+[docs/EMULATOR.md](docs/EMULATOR.md).
+
 ## Install
 
 ```bash
@@ -36,9 +53,12 @@ python -m ec50 grid      # label every key R1C1 .. R3C12
 python -m ec50 test      # press a key, it lights up
 python -m ec50 watch     # key events and T-bar
 python -m ec50 vegas     # colour and LED light show
+python -m ec50 emulate   # the whole panel in a browser, no hardware needed
 ```
 
-Add `--init` after a power cycle. Add `--backend d2xx|pyftdi` to force one.
+Add `--init` after a power cycle. Add `--backend d2xx|pyftdi|net` to force one.
+Add `--controller HOST:PORT` (or set `EC50_CONTROLLER`) to reach a panel — or
+an emulator — over the network instead of USB.
 
 ## Use it
 
@@ -64,7 +84,7 @@ need debouncing.
 
 | | |
 |---|---|
-| `EC50.open(backend=None, index=None, skew=None)` | open the panel |
+| `EC50.open(backend=None, index=None, skew=None, controller=None)` | open the panel |
 | `panel.clear()` | blank every display, darken every backlight, LEDs off |
 | `panel.text(row, col, s, colour)` | label an Assign key, rows 0–2, cols 0–11 |
 | `panel.set_cell_text(cell, s, colour)` | label any of the 45 cells |
@@ -75,6 +95,9 @@ need debouncing.
 | `panel.poll()` → `[Event]` | drain key events, refresh T-bar |
 | `panel.events()` | blocking generator of events |
 | `panel.tbar` / `tbar_raw` / `held` | 0.0–1.0, raw 16-bit, held key set |
+
+`controller` is a `"host:port"` for a panel reached over TCP, which is how you
+talk to the emulator; it selects the network backend on its own.
 
 Colours are `Colour.RED/GREEN/BLUE/YELLOW/CYAN/MAGENTA/ORANGE/PINK/WHITE/DIM/OFF`,
 or `colour(r, g, b)` with each channel 0–3 — 64 in total. LEDs are
@@ -114,6 +137,32 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
 - **The panel's CPLD is field-programmable over the same link.** Nothing here
   goes near that path, and nothing should.
 
+## Emulator
+
+`python -m ec50 emulate` is a complete software EC-50 — 82 buttons, 45 displays,
+72 LEDs and the T-bar, laid out as they are on the panel — speaking the real
+protocol over TCP. Useful for building against the panel without one on the
+desk, and for seeing what the hardware's quirks actually do.
+[docs/EMULATOR.md](docs/EMULATOR.md).
+
+```python
+from ec50.emulator import loopback
+
+panel, dev = loopback()          # driver and virtual panel, no sockets
+panel.text(0, 0, "CAM 1", Colour.GREEN)
+panel.flush()
+assert dev.cell_colour(0) == Colour.GREEN
+```
+
+## Tests
+
+```bash
+python tests/test_emulator.py        # or: python -m pytest tests/ -q
+```
+
+Twenty-five checks against the emulator, so they need no hardware and no
+dependencies. They pin both sides to [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ## Companion
 
 Design for the Bitfocus Companion Satellite integration is in
@@ -124,7 +173,8 @@ as a Companion variable. Not yet implemented.
 
 Working and confirmed on hardware: displays, colour, LEDs, all 82 buttons,
 T-bar, on Windows via D2XX. The Linux and macOS transport is implemented but
-has not yet been run against a panel.
+has not yet been run against a panel. The emulator covers everything the
+protocol document describes and is exercised by the test suite.
 
 Two things remain undecoded, neither blocking: a second 45×4 colour table in
 the framebuffer that Barco's own software never writes, and whether the
