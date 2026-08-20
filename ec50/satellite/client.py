@@ -15,6 +15,10 @@ import time
 from . import protocol as proto
 from .protocol import Message
 
+# Companion closes connections it considers idle. The protocol docs are explicit
+# that the CLIENT must ping, not merely answer pings, and recommend every 2s.
+PING_INTERVAL = 2.0
+
 
 class SatelliteClient:
     def __init__(self, host: str, port: int = proto.DEFAULT_PORT, logger=print,
@@ -27,6 +31,8 @@ class SatelliteClient:
         self._buf = b""
         self._backoff = 1.0
         self._next_attempt = 0.0
+        self._last_ping = 0.0
+        self._ping_seq = 0
         self.api_version: str | None = None
         self.companion_version: str | None = None
         self.registered: set[str] = set()
@@ -49,6 +55,7 @@ class SatelliteClient:
             s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.sock = s
             self._buf = b""
+            self._last_ping = time.monotonic()
             self.registered.clear()
             self._backoff = 1.0
             self.log(f"connected to Companion at {self.host}:{self.port}")
@@ -74,6 +81,28 @@ class SatelliteClient:
 
     # -- io ----------------------------------------------------------------
 
+    def send_raw(self, line: str) -> None:
+        """Send a line that is not key=value, such as PING with a payload."""
+        if self.sock is None:
+            return
+        if self.debug:
+            self.log(f"  >> {line}")
+        try:
+            self.sock.sendall((line + "\n").encode("utf-8"))
+        except OSError as e:
+            self.disconnect(f"send failed: {e}")
+
+    def keepalive(self) -> None:
+        """Ping on schedule. Must be called regularly from the main loop."""
+        if self.sock is None:
+            return
+        now = time.monotonic()
+        if now - self._last_ping < PING_INTERVAL:
+            return
+        self._last_ping = now
+        self._ping_seq += 1
+        self.send_raw(f"PING {self._ping_seq}")
+
     def send(self, command: str, **params) -> None:
         if self.sock is None:
             return
@@ -86,23 +115,31 @@ class SatelliteClient:
             self.disconnect(f"send failed: {e}")
 
     def pump(self) -> list[Message]:
-        """Read whatever is waiting and return the parsed messages."""
+        """Drain everything waiting and return the parsed messages.
+
+        Reads until the socket is empty rather than once per call: Companion
+        bursts a KEY-STATE for every control on a page change, and leaving the
+        rest queued while the panel flushes only lets the backlog grow.
+        """
         if self.sock is None:
             return []
-        try:
-            chunk = self.sock.recv(65536)
-        except BlockingIOError:
-            return []
-        except OSError as e:
-            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+        for _ in range(64):
+            try:
+                chunk = self.sock.recv(262144)
+            except (BlockingIOError, InterruptedError):
+                break
+            except OSError as e:
+                if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    break
+                self.disconnect(f"read failed: {e}")
                 return []
-            self.disconnect(f"read failed: {e}")
-            return []
-        if not chunk:
-            self.disconnect("Companion closed the connection")
-            return []
+            if not chunk:
+                self.disconnect("Companion closed the connection")
+                return []
+            self._buf += chunk
+            if len(chunk) < 262144:
+                break
 
-        self._buf += chunk
         out = []
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
@@ -117,14 +154,18 @@ class SatelliteClient:
                 self.log(f"Companion {self.companion_version}, "
                          f"satellite API {self.api_version}")
             elif msg.command == "PING":
-                self.send("PONG")
+                # Companion echoes the payload back on PONG; do the same for it.
+                self.send_raw(f"PONG {msg.status or ''}".rstrip())
+                continue
+            elif msg.command == "PONG":
                 continue
             out.append(msg)
         return out
 
     # -- registration ------------------------------------------------------
 
-    def add_device(self, surface, device_id: str, serial: str) -> None:
+    def add_device(self, surface, device_id: str, serial: str,
+                   bitmaps: bool = False) -> None:
         # SERIAL must be unique per surface. Companion defaults SERIAL_IS_UNIQUE
         # to true, so four surfaces sharing the panel's serial collide; the
         # device id is already unique and stable, so use that.
@@ -132,7 +173,7 @@ class SatelliteClient:
             "DEVICEID": device_id,
             "PRODUCT_NAME": surface.name,
             "SERIAL": device_id,
-            "LAYOUT_MANIFEST": proto.b64_json(surface.manifest()),
+            "LAYOUT_MANIFEST": proto.b64_json(surface.manifest(bitmaps)),
             "BITMAP_FORMAT": "rgb",
             "BRIGHTNESS": False,
         }

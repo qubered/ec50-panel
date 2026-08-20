@@ -20,11 +20,19 @@ from .. import protocol as P
 
 # Style presets. Controls with no display ask for nothing but colour, so
 # Companion never spends time encoding bitmaps we would throw away.
-STYLE_PRESETS = {
-    "default": {"colors": "hex", "text": True},
-    "lcd": {"bitmap": {"w": P.CELL_W, "h": P.CELL_H},
-            "colors": "hex", "text": True, "textStyle": True},
-}
+def style_presets(bitmaps: bool = False) -> dict:
+    """Controls with no display ask for colour only, so Companion never spends
+    time encoding pixels we would discard.
+
+    Bitmaps are off by default. Requesting them costs about 8 KB per key - some
+    360 KB for a full 45-cell refresh - and the built-in font renders better on
+    a 2:1 monochrome cell than a downscaled square anyway. `--bitmaps` turns on
+    the fallback for buttons that carry artwork instead of text.
+    """
+    lcd = {"colors": "hex", "text": True, "textStyle": True}
+    if bitmaps:
+        lcd["bitmap"] = {"w": P.CELL_W, "h": P.CELL_H}
+    return {"default": {"colors": "hex", "text": True}, "lcd": lcd}
 
 _NAME_TO_INDEX = {info[0]: idx for idx, info in P.BUTTON_INFO.items()}
 
@@ -71,9 +79,9 @@ class Surface:
     def can_change_page(self) -> bool:
         return self.page_up is not None or self.page_down is not None
 
-    def manifest(self) -> dict:
+    def manifest(self, bitmaps: bool = False) -> dict:
         return {
-            "stylePresets": STYLE_PRESETS,
+            "stylePresets": style_presets(bitmaps),
             "controls": {
                 c.id: {"row": c.row, "column": c.column,
                        **({"stylePreset": "lcd"} if c.has_display else {})}

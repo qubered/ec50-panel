@@ -67,7 +67,10 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 
 1. **Text present** → render with the built-in font at native 64 × 32. Crisp, uses
    the full 2:1 cell, and emoji fold to the icon set.
-2. **No text** → dither the bitmap down to 64 × 32 1-bit.
+2. **No text** → dither the bitmap down to 64 × 32 1-bit. Bitmaps are **opt-in**
+   via `--bitmaps`: requesting them costs roughly 8 KB per key, some 360 KB for
+   a full 45-cell refresh, for pixels that are usually discarded in favour of
+   the text.
 3. **Backlight** ← `COLOR`, quantised to the panel's `RRGGBBII` (two bits per
    channel, 64 colours).
 4. **Key LED** ← `PRESSED` from `KEY-STATE`: green while Companion holds the
@@ -124,11 +127,15 @@ blank the panel while disconnected.
 
 ## Companion-side setup
 
-1. **Increase the page grid.** It defaults to 8 columns; these surfaces are 15
+1. **Turn off the surface PIN lock**, or unlock these surfaces. While locked,
+   Companion sends a padlock as the text of every key and nothing useful
+   reaches the panel. Settings → Surfaces.
+2. **Increase the page grid.** It defaults to 8 columns; these surfaces are 15
    wide. Settings → Grid size.
-2. Add the Satellite connection if not already listening on 16622.
-3. Assign each Assign row surface to its page.
-4. In each row surface's settings, set the page up / down / number controls.
+3. Add the Satellite connection if not already listening on 16622.
+4. Assign each Assign row surface to its page.
+5. Tick "Let the panel's page arrows change page" in each row surface's
+   settings; `CHANGE-PAGE` is ignored until you do.
 
 ## Modules
 
@@ -160,8 +167,13 @@ taken from the docs:
   `PAGEDOWN`, `PAGENUM` or `BUTTON` — reported to us, not declared by us.
 - **`CHANGE-PAGE` needs API 1.10.0** and the user must tick the checkbox that
   `CAN_CHANGE_PAGE` creates in the surface's settings; its string is the label.
-- The server opens with `BEGIN CompanionVersion=… ApiVersion=…`, and `PING`
-  must be answered with `PONG`.
+- The server opens with `BEGIN CompanionVersion=… ApiVersion=…`.
+- **The client must send `PING <payload>` about every 2 seconds.** Companion
+  closes connections it considers idle; answering its pings is not enough.
+  Companion replies `PONG <payload>`. This is the single most likely cause of a
+  connection that registers cleanly and then drops.
+- Nothing may be sent for a device before its `ADD-DEVICE OK` arrives, or
+  Companion answers `ERROR … Device not found`.
 
 ## Implementation
 

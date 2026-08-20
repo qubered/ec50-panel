@@ -37,7 +37,8 @@ def quantise_colour(rgb) -> int:
 
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
-                 backend=None, logger=print, init=False, debug=False):
+                 backend=None, logger=print, init=False, debug=False,
+                 bitmaps=False):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -49,6 +50,8 @@ class SatelliteService:
             raise RuntimeError("surface map is inconsistent: " + "; ".join(problems))
 
         self.client = SatelliteClient(host, port, logger, debug=debug)
+        self.bitmaps = bitmaps
+        self._lock_warned = False
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
         # Which surface owns each panel button, and its control.
@@ -89,6 +92,12 @@ class SatelliteService:
 
         if control.has_display:
             text = msg.b64("TEXT")
+            if text == "\U0001f512" and not self._lock_warned:
+                self._lock_warned = True
+                self.log("!! Companion is sending a padlock for every key: these "
+                         "surfaces are PIN locked.\n"
+                         "   Turn off Settings > Surfaces > 'Enable surface PIN "
+                         "lock' in Companion, or unlock them there.")
             if text:
                 self.panel.set_cell_text(control.cell, text.replace("\\n", " "))
             elif msg.get("BITMAP"):
@@ -133,6 +142,8 @@ class SatelliteService:
                 continue
             surface, target = route
             device_id = self.device_ids[surface.key]
+            if device_id not in self.client.registered:
+                continue          # Companion rejects anything before ADD-DEVICE OK
             if isinstance(target, bool):
                 if ev.pressed:                      # page arrows fire on press
                     self.client.change_page(device_id, target)
@@ -140,11 +151,12 @@ class SatelliteService:
                 self.client.key_press(device_id, target.id, ev.pressed)
 
         now = time.monotonic()
-        if now - self._last_tbar_at >= TBAR_INTERVAL:
+        control_id = self.device_ids["control"]
+        if (now - self._last_tbar_at >= TBAR_INTERVAL
+                and control_id in self.client.registered):
             value = self.panel.tbar
             if abs(value - self._last_tbar) >= TBAR_DEADBAND:
-                self.client.set_variable(self.device_ids["control"], "tbar",
-                                         f"{value * 100:.1f}")
+                self.client.set_variable(control_id, "tbar", f"{value * 100:.1f}")
                 self._last_tbar = value
             self._last_tbar_at = now
 
@@ -152,7 +164,8 @@ class SatelliteService:
 
     def _register(self):
         for surface in self.surfaces:
-            self.client.add_device(surface, self.device_ids[surface.key], self.serial)
+            self.client.add_device(surface, self.device_ids[surface.key],
+                                   self.serial, bitmaps=self.bitmaps)
             self.log(f"registered {surface.name} "
                      f"({len(surface.controls)} controls)")
 
@@ -183,6 +196,7 @@ class SatelliteService:
                                  f"{dict(list(msg.args.items())[:4])}")
 
                 if self.client.connected:
+                    self.client.keepalive()
                     self._handle_panel()
 
                 now = time.monotonic()
