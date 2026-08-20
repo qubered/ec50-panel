@@ -1,0 +1,14 @@
+# Barco Event Master USB boards, including the EC-50's "Show Console Board"
+# (0600:0336). Nothing in the kernel claims VID 0x0600 - it is absent from
+# ftdi_sio's table - so libusb reaches the device directly once this grants
+# access. Matches the access Barco's own Toolset installs on Linux.
+#
+#   sudo cp 71-ec50.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Replace MODE="0666" with GROUP="plugdev", MODE="0660" to restrict by group.
+
+SUBSYSTEM!="usb", GOTO="ec50_rules_end"
+ACTION!="add", GOTO="ec50_rules_end"
+ATTRS{idVendor}=="0600", MODE="0666", GROUP="plugdev"
+LABEL="ec50_rules_end"

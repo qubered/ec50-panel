@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ec50-panel"
+version = "1.0.0"
+description = "Driver for the Barco EC-50 Event Controller's USB control surface"
+readme = "README.md"
+requires-python = ">=3.9"
+keywords = ["barco", "ec-50", "event-master", "ftdi", "control-surface", "companion"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Topic :: Multimedia :: Video",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+
+[project.optional-dependencies]
+windows = ["ftd2xx"]
+posix = ["pyftdi"]
+
+[project.scripts]
+ec50 = "ec50.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ec50*"]

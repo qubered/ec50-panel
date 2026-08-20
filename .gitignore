@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.DS_Store
+
+# Research material: Barco's own software and files, plus USB captures that
+# contain this unit's serial number. Kept locally, never committed.
+_research/
+*.pcap
+*.jam
+*.inf
+showConsoleMap.csv
+hesPrgmrConsoleMap.csv
+devices.txt
