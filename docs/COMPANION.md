@@ -13,9 +13,9 @@ else shares a fourth.
 
 | Surface | Device ID | Controls | Grid |
 |---|---|---|---|
-| Assign Row 1 | `ec50-<serial>-row1` | 15 | 15 × 1 |
-| Assign Row 2 | `ec50-<serial>-row2` | 15 | 15 × 1 |
-| Assign Row 3 | `ec50-<serial>-row3` | 15 | 15 × 1 |
+| Assign Row 1 | `ec50-<serial>-row1` | 13 | 13 × 1 |
+| Assign Row 2 | `ec50-<serial>-row2` | 13 | 13 × 1 |
+| Assign Row 3 | `ec50-<serial>-row3` | 13 | 13 × 1 |
 | Control | `ec50-<serial>-control` | 39 | 15 × 3 |
 
 `<serial>` comes from the FTDI EEPROM (e.g. `PE4662-029`), so surfaces persist
@@ -34,14 +34,17 @@ panel's real geometry rather than pretending to be a Stream Deck.
 | Column | Control ID | Button | Display |
 |---|---|---|---|
 | 0–11 | `key/0` … `key/11` | `ASSIGN_n_0` … `_11` | its own cell |
-| 12 | `page/up` | `ASSIGN_n_UP` | — |
-| 13 | `page/down` | `ASSIGN_n_DOWN` | — |
-| 14 | `page/num` | `ASSIGN_n_LABEL` | cell 11 / 14 / 17 |
+| 12 | `label` | `ASSIGN_n_LABEL` | cell 11 / 14 / 17 |
 
-Designate `page/up`, `page/down` and `page/num` as the surface's page controls in
-Companion. It then pages that row natively and sends `TYPE=PAGENUM` for the
-label, so **the row's LCD shows its live page number** — row 1 literally reads
-`Pg 70`. That is what Barco's own software puts on those displays.
+**The page arrows are not Companion controls.** `ADD-DEVICE` declares
+`CAN_CHANGE_PAGE`, and pressing `ASSIGN_n_UP` / `_DOWN` sends
+`CHANGE-PAGE DEVICEID=… DIRECTION=…`, which pages that surface directly. That is
+what those keys are for physically, and it keeps two columns free.
+
+The row's `label` control drives the LCD beside the arrows. Put a Companion
+**page-number button** there and Companion reports `TYPE=PAGENUM`, so the row
+shows its live page — row 1 reads `Pg 70`. That is exactly what Barco's own
+software puts on those displays (`Preset` / `Pg 2` in the captures).
 
 ### Control surface
 
@@ -139,25 +142,36 @@ ec50/satellite/
 
 CLI: `python -m ec50 satellite --host 127.0.0.1 [--port 16622]`
 
-## To verify before coding
+## Verified against the source
 
-The protocol reference above is from Companion's developer docs. Two details
-should be checked against the reference client in
-[bitfocus/companion-satellite](https://github.com/bitfocus/companion-satellite)
-rather than assumed:
+Checked against `companion/lib/Service/Satellite/` at API **1.10.0** rather than
+taken from the docs:
 
-- Exact `stylePreset` field names in `LAYOUT_MANIFEST` (`bitmap`, `colors`, and
-  whether `text` belongs there).
-- Whether `TEXT` is still populated in current Companion, or whether text is now
-  only ever baked into bitmaps. The whole "text first" rendering path depends on
-  it; the bitmap fallback is the safety net if it turns out to be empty.
+- **`TEXT` is populated.** `SatelliteRenderUtil.ts` sets it from
+  `drawStyle?.text?.text`, base64 encoded, so the text-first rendering path is
+  sound. `COLOR` / `TEXTCOLOR` follow the requested `hex` or `rgb` format and
+  `FONT_SIZE` comes with `TEXT_STYLE`.
+- **Style preset fields** are `bitmap: {w, h}`, `text`, `textStyle`,
+  `colors: "hex"|"rgb"` and `leds`, per `satellite-surface.schema.json`. A
+  preset named `default` is required.
+- **Control ids** must match `^[a-zA-Z0-9\-/]+$`.
+- **Advanced mode uses `CONTROLID=`**, not `KEY=`.
+- **`TYPE`** is a property of the Companion button's own style — `PAGEUP`,
+  `PAGEDOWN`, `PAGENUM` or `BUTTON` — reported to us, not declared by us.
+- **`CHANGE-PAGE` needs API 1.10.0** and the user must tick the checkbox that
+  `CAN_CHANGE_PAGE` creates in the surface's settings; its string is the label.
+- The server opens with `BEGIN CompanionVersion=… ApiVersion=…`, and `PING`
+  must be answered with `PONG`.
 
-## Build order
+## Implementation
 
-1. `protocol.py` + `client.py` — connect, register one dummy surface, log traffic.
-2. `surfaces.py` — the maps, unit-testable without hardware.
-3. Input path — `KEY-PRESS` out, verified against Companion's button feedback.
-4. Output path — text rendering and colour, then LEDs.
-5. T-bar variable.
-6. Bitmap fallback and dithering.
-7. Reconnection and edge cases.
+```
+ec50/satellite/
+    protocol.py   line encode/decode, base64 fields, colour parsing
+    surfaces.py   the four surface definitions, plus check() for the mapping
+    client.py     non-blocking TCP client, reconnect, registration
+    service.py    the event loop
+```
+
+`surfaces.check()` asserts that the map covers all 82 buttons and all 45
+displays exactly once; the service refuses to start if it does not.

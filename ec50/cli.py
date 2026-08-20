@@ -8,6 +8,7 @@
     python -m ec50 watch                    key events and T-bar
     python -m ec50 test                     press a key, it lights up
     python -m ec50 vegas                    colour and LED light show
+    python -m ec50 satellite --host IP      serve the panel to Companion
 
 Close the Event Master Toolset first - the panel takes one host at a time.
 Add --init after a power cycle. Add --backend d2xx|pyftdi to force one.
@@ -110,6 +111,11 @@ def cmd_test(panel, args):
         print("\npanel cleared. stopped.")
 
 
+def cmd_satellite(panel, args):
+    from .satellite.service import SatelliteService
+    SatelliteService(args.host, args.port, panel=panel, init=False).run()
+
+
 def cmd_vegas(panel, args):
     words = ["VEGAS", "EC50", "BARCO", "LIVE"]
     seq = (Led.RED, Led.GREEN, Led.OFF, Led.OFF)
@@ -136,6 +142,7 @@ def cmd_vegas(panel, args):
 
 
 COMMANDS = {
+    "satellite": cmd_satellite,
     "info": cmd_info, "clear": cmd_clear, "text": cmd_text, "grid": cmd_grid,
     "watch": cmd_watch, "test": cmd_test, "vegas": cmd_vegas,
 }
@@ -154,6 +161,8 @@ def main():
     ap.add_argument("--no-skew", action="store_true",
                     help="do not compensate the panel's right-half row skew")
     ap.add_argument("--fps", type=int, default=8, help="vegas frame rate")
+    ap.add_argument("--host", default="127.0.0.1", help="Companion host for `satellite`")
+    ap.add_argument("--port", type=int, default=16622, help="Companion satellite port")
     args = ap.parse_args()
 
     try:
