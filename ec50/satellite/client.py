@@ -165,7 +165,7 @@ class SatelliteClient:
     # -- registration ------------------------------------------------------
 
     def add_device(self, surface, device_id: str, serial: str,
-                   bitmaps: bool = False) -> None:
+                   bitmaps: bool = False, columns: int = 8) -> None:
         # SERIAL must be unique per surface. Companion defaults SERIAL_IS_UNIQUE
         # to true, so four surfaces sharing the panel's serial collide; the
         # device id is already unique and stable, so use that.
@@ -173,7 +173,7 @@ class SatelliteClient:
             "DEVICEID": device_id,
             "PRODUCT_NAME": surface.name,
             "SERIAL": device_id,
-            "LAYOUT_MANIFEST": proto.b64_json(surface.manifest(bitmaps)),
+            "LAYOUT_MANIFEST": proto.b64_json(surface.manifest(bitmaps, columns)),
             "BITMAP_FORMAT": "rgb",
             "BRIGHTNESS": False,
         }

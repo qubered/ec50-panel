@@ -48,7 +48,7 @@ def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
-                 bitmaps=False, blank=P.Colour.DIM):
+                 bitmaps=False, blank=P.Colour.DIM, columns=8):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -62,6 +62,7 @@ class SatelliteService:
         self.client = SatelliteClient(host, port, logger, debug=debug)
         self.bitmaps = bitmaps
         self.blank = blank
+        self.columns = columns
         self._lock_warned = False
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
@@ -179,9 +180,11 @@ class SatelliteService:
     def _register(self):
         for surface in self.surfaces:
             self.client.add_device(surface, self.device_ids[surface.key],
-                                   self.serial, bitmaps=self.bitmaps)
+                                   self.serial, bitmaps=self.bitmaps,
+                                   columns=self.columns)
+            rows, cols = surface.shape(self.columns)
             self.log(f"registered {surface.name} "
-                     f"({len(surface.controls)} controls)")
+                     f"({len(surface.controls)} controls, {cols}x{rows} grid)")
 
     def run(self):
         self.log(f"panel serial {self.serial} on {self.panel.backend}")

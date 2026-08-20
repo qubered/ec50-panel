@@ -119,7 +119,7 @@ def cmd_satellite(panel, args):
     from .satellite.service import SatelliteService
     SatelliteService(args.host, args.port, panel=panel, init=False,
                      debug=args.debug, bitmaps=args.bitmaps,
-                     blank=BLANK_STYLES[args.blank]).run()
+                     blank=BLANK_STYLES[args.blank], columns=args.columns).run()
 
 
 def cmd_vegas(panel, args):
@@ -170,6 +170,9 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="Companion host for `satellite`")
     ap.add_argument("--port", type=int, default=16622, help="Companion satellite port")
     ap.add_argument("--debug", action="store_true", help="log raw satellite traffic")
+    ap.add_argument("--columns", type=int, default=8, metavar="N",
+                    help="width of Companion's page grid; controls wrap onto it "
+                         "(default 8, Companion's own default). 0 disables wrapping.")
     ap.add_argument("--blank", choices=sorted(BLANK_STYLES), default="dim",
                     help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",

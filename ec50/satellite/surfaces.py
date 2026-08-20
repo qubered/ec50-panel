@@ -79,13 +79,48 @@ class Surface:
     def can_change_page(self) -> bool:
         return self.page_up is not None or self.page_down is not None
 
-    def manifest(self, bitmaps: bool = False) -> dict:
+    def wrap(self, columns: int) -> list[tuple[Control, int, int]]:
+        """Lay the controls out `columns` wide, in declaration order.
+
+        The panel's rows are wider than any Companion page grid - 12 Assign keys
+        against a default of 8 columns - so a surface declared at its physical
+        width would run off the page. Wrapping keeps every control reachable on
+        a normal grid: with 8 columns an Assign row fills the top row and spills
+        the last four keys plus its label onto the next.
+
+        Companion does not expose the page grid size over the satellite protocol
+        or the HTTP API, so the width has to be supplied.
+        """
+        if columns <= 0:
+            return [(c, c.row, c.column) for c in self.controls]
+        out, row, col = [], 0, 0
+        last_logical = self.controls[0].row if self.controls else 0
+        for c in self.controls:
+            # Start a fresh grid row wherever the panel starts a new physical
+            # row, so the Control surface keeps its destination / layer /
+            # transport groups visually separate.
+            if c.row != last_logical:
+                last_logical = c.row
+                if col:
+                    row, col = row + 1, 0
+            out.append((c, row, col))
+            col += 1
+            if col >= columns:
+                row, col = row + 1, 0
+        return out
+
+    def shape(self, columns: int) -> tuple[int, int]:
+        placed = self.wrap(columns)
+        return (max(r for _, r, _ in placed) + 1,
+                max(c for _, _, c in placed) + 1)
+
+    def manifest(self, bitmaps: bool = False, columns: int = 8) -> dict:
         return {
             "stylePresets": style_presets(bitmaps),
             "controls": {
-                c.id: {"row": c.row, "column": c.column,
+                c.id: {"row": r, "column": col,
                        **({"stylePreset": "lcd"} if c.has_display else {})}
-                for c in self.controls
+                for c, r, col in self.wrap(columns)
             },
         }
 

@@ -11,12 +11,12 @@ therefore means one `ADD-DEVICE` per row — three registrations over a single T
 connection, each appearing separately in Companion's Surfaces table. Everything
 else shares a fourth.
 
-| Surface | Device ID | Controls | Grid |
+| Surface | Device ID | Controls | Grid at `--columns 8` |
 |---|---|---|---|
-| Assign Row 1 | `ec50-<serial>-row1` | 13 | 13 × 1 |
-| Assign Row 2 | `ec50-<serial>-row2` | 13 | 13 × 1 |
-| Assign Row 3 | `ec50-<serial>-row3` | 13 | 13 × 1 |
-| Control | `ec50-<serial>-control` | 39 | 15 × 3 |
+| Assign Row 1 | `ec50-<serial>-row1` | 13 | 8 × 2 |
+| Assign Row 2 | `ec50-<serial>-row2` | 13 | 8 × 2 |
+| Assign Row 3 | `ec50-<serial>-row3` | 13 | 8 × 2 |
+| Control | `ec50-<serial>-control` | 39 | 8 × 6 |
 
 `<serial>` comes from the FTDI EEPROM (e.g. `PE4662-029`), so surfaces persist
 across restarts and two panels on one host don't collide.
@@ -24,10 +24,32 @@ across restarts and two panels on one host don't collide.
 The four surfaces account for **all 82 buttons and all 45 displays**, with
 nothing orphaned and nothing invented.
 
+## Wrapping onto the page grid
+
+The panel is wider than any Companion page: 12 Assign keys against a default
+grid of 8 columns. Controls are therefore **wrapped** in declaration order onto
+a grid `--columns` wide, so at 8 an Assign row fills the top row and spills its
+last four keys plus the label onto the next:
+
+```
+key/0  key/1  key/2  key/3  key/4  key/5  key/6  key/7
+key/8  key/9  key/10 key/11 label
+```
+
+A new physical row on the panel always starts a new grid row, so the Control
+surface keeps its destination, layer and transport groups visually separate
+rather than running together.
+
+Set `--columns` to match Companion's Settings → Grid size. **Companion does not
+expose the page grid size** — not over the satellite protocol, whose `gridSize`
+is computed from the client's own manifest, and not through the HTTP API — so it
+has to be supplied. The default of 8 matches Companion's own default.
+`--columns 0` disables wrapping and declares each surface at its physical width.
+
 ## Control layout
 
-Declared in advanced mode via a base64 `LAYOUT_MANIFEST`, so the grid mirrors the
-panel's real geometry rather than pretending to be a Stream Deck.
+Declared in advanced mode via a base64 `LAYOUT_MANIFEST`. The tables below give
+declaration order; actual row/column comes from the wrap above.
 
 ### Assign row (× 3)
 
@@ -135,8 +157,9 @@ blank the panel while disconnected.
 1. **Turn off the surface PIN lock**, or unlock these surfaces. While locked,
    Companion sends a padlock as the text of every key and nothing useful
    reaches the panel. Settings → Surfaces.
-2. **Increase the page grid.** It defaults to 8 columns; these surfaces are 15
-   wide. Settings → Grid size.
+2. **Match `--columns` to your page grid.** Settings → Grid size. Nothing needs
+   widening — controls wrap to fit — but the width must agree or they will land
+   in the wrong places.
 3. Add the Satellite connection if not already listening on 16622.
 4. Assign each Assign row surface to its page.
 5. Tick "Let the panel's page arrows change page" in each row surface's

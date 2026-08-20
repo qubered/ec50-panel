@@ -126,6 +126,11 @@ transport. Button text renders on the LCDs, presses reach Companion, the row
 page arrows change that row's page, and the T-bar arrives as a Companion
 variable.
 
+The panel is wider than a Companion page, so controls wrap onto the page grid —
+`--columns 8` (the default) puts an Assign row's first 8 keys on one grid row
+and the remaining 4 plus its label on the next. Match it to Settings → Grid
+size.
+
 See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 
 ## Status
