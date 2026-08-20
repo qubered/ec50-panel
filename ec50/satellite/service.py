@@ -93,11 +93,12 @@ class SatelliteService:
         if control.has_display:
             text = msg.b64("TEXT")
             if text == "\U0001f512" and not self._lock_warned:
+                # Companion draws a lock onto every control of a locked surface
+                # when the client has not declared PINCODE_LOCK, so a padlock on
+                # everything means locked rather than a button that says "lock".
                 self._lock_warned = True
-                self.log("!! Companion is sending a padlock for every key: these "
-                         "surfaces are PIN locked.\n"
-                         "   Turn off Settings > Surfaces > 'Enable surface PIN "
-                         "lock' in Companion, or unlock them there.")
+                self.log("note: every key is a padlock, so these surfaces are "
+                         "locked in Companion. Unlock them there to see content.")
             if text:
                 self.panel.set_cell_text(control.cell, text.replace("\\n", " "))
             elif msg.get("BITMAP"):
@@ -191,6 +192,12 @@ class SatelliteService:
                                  f"{msg.get('MESSAGE', msg.args)}")
                     elif msg.command == "ADD-DEVICE" and msg.status == "OK":
                         self.client.registered.add(str(msg.get("DEVICEID")))
+                    elif msg.command == "LOCKED-STATE":
+                        # Only sent to clients declaring PINCODE_LOCK, which we
+                        # do not; harmless, but do not log it as unexpected.
+                        pass
+                    elif msg.command in ("BRIGHTNESS", "KEYS-CLEAR", "CAPS"):
+                        pass
                     elif msg.command not in ("PONG", "KEY-STATE"):
                         self.log(f"   unhandled: {msg.command} {msg.status or ''} "
                                  f"{dict(list(msg.args.items())[:4])}")
