@@ -129,3 +129,12 @@ has not yet been run against a panel.
 Two things remain undecoded, neither blocking: a second 45×4 colour table in
 the framebuffer that Barco's own software never writes, and whether the
 framebuffer accepts an address other than `0x0000` for partial updates.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+The protocol was reverse engineered for interoperability. This repository
+contains no Barco software, files or firmware; only our own code and factual
+descriptions of how the hardware behaves. It is not affiliated with or endorsed
+by Barco.
