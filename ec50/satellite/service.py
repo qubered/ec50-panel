@@ -37,7 +37,7 @@ def quantise_colour(rgb) -> int:
 
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
-                 backend=None, logger=print, init=False):
+                 backend=None, logger=print, init=False, debug=False):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -48,7 +48,7 @@ class SatelliteService:
         if problems:
             raise RuntimeError("surface map is inconsistent: " + "; ".join(problems))
 
-        self.client = SatelliteClient(host, port, logger)
+        self.client = SatelliteClient(host, port, logger, debug=debug)
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
         # Which surface owns each panel button, and its control.
@@ -163,20 +163,24 @@ class SatelliteService:
         try:
             while True:
                 if not self.client.connected:
-                    if self.client.connect():
-                        self._register()
-                    else:
+                    if not self.client.connect():
                         time.sleep(0.2)
                         continue
 
                 for msg in self.client.pump():
                     if msg.command == "KEY-STATE":
                         self._apply_key_state(msg)
-                    elif msg.status == "ERROR":
-                        self.log(f"Companion error: {msg.command} "
-                                 f"{msg.get('MESSAGE', '')}")
+                    elif msg.command == "BEGIN":
+                        # Companion greets first; register only after that.
+                        self._register()
+                    elif msg.status == "ERROR" or msg.command == "ERROR":
+                        self.log(f"!! Companion rejected {msg.command}: "
+                                 f"{msg.get('MESSAGE', msg.args)}")
                     elif msg.command == "ADD-DEVICE" and msg.status == "OK":
                         self.client.registered.add(str(msg.get("DEVICEID")))
+                    elif msg.command not in ("PONG", "KEY-STATE"):
+                        self.log(f"   unhandled: {msg.command} {msg.status or ''} "
+                                 f"{dict(list(msg.args.items())[:4])}")
 
                 if self.client.connected:
                     self._handle_panel()

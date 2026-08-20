@@ -17,10 +17,12 @@ from .protocol import Message
 
 
 class SatelliteClient:
-    def __init__(self, host: str, port: int = proto.DEFAULT_PORT, logger=print):
+    def __init__(self, host: str, port: int = proto.DEFAULT_PORT, logger=print,
+                 debug: bool = False):
         self.host = host
         self.port = port
         self.log = logger
+        self.debug = debug
         self.sock: socket.socket | None = None
         self._buf = b""
         self._backoff = 1.0
@@ -75,8 +77,11 @@ class SatelliteClient:
     def send(self, command: str, **params) -> None:
         if self.sock is None:
             return
+        line = proto.encode(command, **params)
+        if self.debug:
+            self.log(f"  >> {line.decode('utf-8', 'replace').rstrip()}")
         try:
-            self.sock.sendall(proto.encode(command, **params))
+            self.sock.sendall(line)
         except OSError as e:
             self.disconnect(f"send failed: {e}")
 
@@ -101,13 +106,16 @@ class SatelliteClient:
         out = []
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
+            if self.debug:
+                self.log(f"  << {line.decode('utf-8', 'replace').rstrip()}")
             msg = proto.decode(line.decode("utf-8", "replace"))
             if msg is None:
                 continue
             if msg.command == "BEGIN":
-                self.api_version = str(msg.get("APIVERSION") or msg.get("APIVERSION"))
+                self.api_version = str(msg.get("APIVERSION") or "?")
                 self.companion_version = str(msg.get("COMPANIONVERSION") or "?")
-                self.log(f"Companion {self.companion_version}, satellite API {self.api_version}")
+                self.log(f"Companion {self.companion_version}, "
+                         f"satellite API {self.api_version}")
             elif msg.command == "PING":
                 self.send("PONG")
                 continue
@@ -117,10 +125,13 @@ class SatelliteClient:
     # -- registration ------------------------------------------------------
 
     def add_device(self, surface, device_id: str, serial: str) -> None:
+        # SERIAL must be unique per surface. Companion defaults SERIAL_IS_UNIQUE
+        # to true, so four surfaces sharing the panel's serial collide; the
+        # device id is already unique and stable, so use that.
         params = {
             "DEVICEID": device_id,
             "PRODUCT_NAME": surface.name,
-            "SERIAL": serial,
+            "SERIAL": device_id,
             "LAYOUT_MANIFEST": proto.b64_json(surface.manifest()),
             "BITMAP_FORMAT": "rgb",
             "BRIGHTNESS": False,

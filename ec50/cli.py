@@ -113,7 +113,8 @@ def cmd_test(panel, args):
 
 def cmd_satellite(panel, args):
     from .satellite.service import SatelliteService
-    SatelliteService(args.host, args.port, panel=panel, init=False).run()
+    SatelliteService(args.host, args.port, panel=panel, init=False,
+                     debug=args.debug).run()
 
 
 def cmd_vegas(panel, args):
@@ -163,6 +164,7 @@ def main():
     ap.add_argument("--fps", type=int, default=8, help="vegas frame rate")
     ap.add_argument("--host", default="127.0.0.1", help="Companion host for `satellite`")
     ap.add_argument("--port", type=int, default=16622, help="Companion satellite port")
+    ap.add_argument("--debug", action="store_true", help="log raw satellite traffic")
     args = ap.parse_args()
 
     try:
