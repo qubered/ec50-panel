@@ -116,9 +116,17 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
 
 ## Companion
 
-Design for the Bitfocus Companion Satellite integration is in
-[docs/COMPANION.md](docs/COMPANION.md) — four surfaces, per-row pages, the T-bar
-as a Companion variable. Not yet implemented.
+```bash
+python -m ec50 satellite --host <companion-ip>
+```
+
+Registers four surfaces — the three Assign rows separately so Companion can page
+them independently, plus a Control surface for destinations, layers and
+transport. Button text renders on the LCDs, presses reach Companion, the row
+page arrows change that row's page, and the T-bar arrives as a Companion
+variable.
+
+See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 
 ## Status
 

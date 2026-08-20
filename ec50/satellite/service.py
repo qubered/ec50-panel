@@ -27,18 +27,28 @@ TBAR_INTERVAL = 0.05        # 20 Hz
 TBAR_DEADBAND = 0.005       # 0.5% of travel
 
 
-def quantise_colour(rgb) -> int:
-    """24-bit RGB down to the panel's two-bits-per-channel backlight byte."""
-    if rgb is None:
-        return P.Colour.OFF
-    r, g, b = ((v * 3 + 127) // 255 for v in rgb)
+def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
+    """Choose a backlight from Companion's button colour.
+
+    Not a literal mapping. Companion's default button background is #000000,
+    and taking that at face value leaves every key dark and unreadable - the
+    panel's pixels are dark-on-lit, so the backlight IS the legibility. A key
+    carrying content therefore lights white when its colour would come out
+    black, and an empty key falls back to `blank`.
+
+    Barco's own software works the same way: dim white for a blank button,
+    bright white for one with a label.
+    """
+    r, g, b = ((v * 3 + 127) // 255 for v in (rgb or (0, 0, 0)))
+    if (r, g, b) == (0, 0, 0):
+        return P.Colour.WHITE if has_content else blank
     return P.colour(r, g, b)
 
 
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
-                 bitmaps=False):
+                 bitmaps=False, blank=P.Colour.DIM):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -51,6 +61,7 @@ class SatelliteService:
 
         self.client = SatelliteClient(host, port, logger, debug=debug)
         self.bitmaps = bitmaps
+        self.blank = blank
         self._lock_warned = False
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
@@ -92,6 +103,7 @@ class SatelliteService:
 
         if control.has_display:
             text = msg.b64("TEXT")
+            rgb = proto.parse_colour(msg.get("COLOR"))
             if text == "\U0001f512" and not self._lock_warned:
                 # Companion draws a lock onto every control of a locked surface
                 # when the client has not declared PINCODE_LOCK, so a padlock on
@@ -105,8 +117,9 @@ class SatelliteService:
                 self._draw_bitmap(control.cell, msg)
             else:
                 self.panel.clear_cell(control.cell)
-            self.panel.set_colour(control.cell, quantise_colour(
-                proto.parse_colour(msg.get("COLOR"))))
+            has_content = bool(text) or bool(msg.get("BITMAP")) or bool(rgb and max(rgb))
+            self.panel.set_colour(control.cell,
+                                  backlight(rgb, has_content, self.blank))
             self._dirty_display = True
 
         if control.button is not None:
@@ -196,6 +209,8 @@ class SatelliteService:
                         # Only sent to clients declaring PINCODE_LOCK, which we
                         # do not; harmless, but do not log it as unexpected.
                         pass
+                    elif msg.status == "OK":
+                        pass          # routine acknowledgement
                     elif msg.command in ("BRIGHTNESS", "KEYS-CLEAR", "CAPS"):
                         pass
                     elif msg.command not in ("PONG", "KEY-STATE"):

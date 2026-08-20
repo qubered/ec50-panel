@@ -72,7 +72,12 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
    a full 45-cell refresh, for pixels that are usually discarded in favour of
    the text.
 3. **Backlight** ← `COLOR`, quantised to the panel's `RRGGBBII` (two bits per
-   channel, 64 colours).
+   channel, 64 colours) — but **not literally**. Companion's default button
+   background is `#000000`, and the panel's pixels are dark-on-lit, so the
+   backlight is what makes a key legible at all. A key carrying content lights
+   **white** when its colour would come out black; an empty key falls back to
+   dim (`--blank off|dim|white`). Barco's own software does the same: `0x57`
+   dim white for a blank button, `0xFF` bright white for a labelled one.
 4. **Key LED** ← `PRESSED` from `KEY-STATE`: green while Companion holds the
    button active, off otherwise. This reflects Companion's view, so remotely
    triggered presses light up too.

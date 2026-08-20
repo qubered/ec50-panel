@@ -25,6 +25,10 @@ from .protocol import Colour, Led
 from .transport import TransportError, default_backend
 
 
+# Backlight for a key Companion has nothing on.
+BLANK_STYLES = {"dim": Colour.DIM, "off": Colour.OFF, "white": Colour.WHITE}
+
+
 def short_label(name):
     if name.startswith("ASSIGN_"):
         parts = name.split("_")
@@ -114,7 +118,8 @@ def cmd_test(panel, args):
 def cmd_satellite(panel, args):
     from .satellite.service import SatelliteService
     SatelliteService(args.host, args.port, panel=panel, init=False,
-                     debug=args.debug, bitmaps=args.bitmaps).run()
+                     debug=args.debug, bitmaps=args.bitmaps,
+                     blank=BLANK_STYLES[args.blank]).run()
 
 
 def cmd_vegas(panel, args):
@@ -165,6 +170,8 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="Companion host for `satellite`")
     ap.add_argument("--port", type=int, default=16622, help="Companion satellite port")
     ap.add_argument("--debug", action="store_true", help="log raw satellite traffic")
+    ap.add_argument("--blank", choices=sorted(BLANK_STYLES), default="dim",
+                    help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",
                     help="also request button bitmaps as a fallback for keys with no text")
     args = ap.parse_args()
