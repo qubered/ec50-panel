@@ -70,25 +70,40 @@ class D2xxTransport(Transport):
         if n == 0:
             raise TransportError("no FTDI devices found; is the EC-50 powered and connected?")
 
+        def text(v):
+            return v.decode("latin-1", "replace") if isinstance(v, bytes) else (v or "")
+
         target = index
         found = []
         for i in range(n):
             info = ftd2xx.getDeviceInfoDetail(i)
-            desc = info.get("description", b"")
-            if isinstance(desc, bytes):
-                desc = desc.decode("latin-1", "replace")
-            found.append(desc)
+            desc, serial = text(info.get("description")), text(info.get("serial"))
+            found.append((i, desc, serial))
             if target is None and any(s in desc.lower() for s in PRODUCT_STRINGS):
                 target = i
+
+        # D2XX reports an empty description and serial for a device that some
+        # other process already has open, so a blank entry is a strong hint
+        # rather than a broken panel. Try it anyway when it is the only device.
+        blank = [i for i, d, ser in found if not d and not ser]
+        if target is None and len(found) == 1:
+            target = found[0][0]
+
         if target is None:
+            listing = ", ".join(f"[{i}] {d!r}" for i, d, _ in found)
             raise TransportError(
-                "could not identify the console board among: " + ", ".join(repr(d) for d in found))
+                f"could not identify the console board among: {listing}\n"
+                "Pick one explicitly with --index N.")
 
         try:
             self.dev = ftd2xx.open(target)
         except Exception as e:
+            hint = ("\nThe device reported a blank description, which usually means "
+                    "another process already has it open." if blank else "")
             raise TransportError(
-                f"could not open the device ({e}). Close the Event Master Toolset - "
+                f"could not open device {target} ({e}).{hint}\n"
+                "Close the Event Master Toolset and any other script using the panel, "
+                "then unplug and re-plug the USB-B cable if it persists. "
                 "D2XX access is exclusive.")
 
         self.dev.setTimeouts(2000, 2000)
