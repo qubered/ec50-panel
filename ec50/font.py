@@ -425,21 +425,86 @@ def fit(text, cell_w, scale=None):
     return text, scale
 
 
+# Companion sends real newlines; some sources send the two characters
+# backslash-n instead. Both mean the same thing on a button.
+_BREAKS = ("\r\n", "\r", "\u2028", "\u2029", "\\n")
+
+
+def split_lines(text: str) -> list[str]:
+    """Break text on any flavour of newline."""
+    for token in _BREAKS:
+        text = text.replace(token, "\n")
+    return text.split("\n")
+
+
+def wrap_line(text, cell_w, scale) -> list[str]:
+    """Greedy word wrap, breaking mid-word only when a single word cannot fit."""
+    if text_width(text, scale) <= cell_w:
+        return [text]
+    lines, cur = [], ""
+    for word in text.split(" "):
+        trial = f"{cur} {word}" if cur else word
+        if text_width(trial, scale) <= cell_w:
+            cur = trial
+            continue
+        if cur:
+            lines.append(cur)
+            cur = ""
+        while word and text_width(word, scale) > cell_w:
+            n = len(word)
+            while n > 1 and text_width(word[:n], scale) > cell_w:
+                n -= 1
+            lines.append(word[:n])
+            word = word[n:]
+        cur = word
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
+def layout(text, cell_w, cell_h, scale=None):
+    """Split into lines and pick the largest scale that fits the cell.
+
+    Returns (lines, scale, leading). A 64x32 cell holds one line at scale 3,
+    two at scale 2 or four at scale 1, so dropping a scale buys a line.
+    Leading is tried at `scale` first and then at nothing, because two lines
+    at scale 2 need all 32 rows and would otherwise fall back to scale 1.
+    """
+    raw = [normalise(line) for line in split_lines(text)]
+    fallback = None
+    for s in ((scale,) if scale is not None else (3, 2, 1)):
+        lines = [w for line in raw for w in wrap_line(line, cell_w, s)]
+        for lead in (s, 0):
+            if len(lines) * GLYPH_H * s + lead * (len(lines) - 1) <= cell_h:
+                return lines, s, lead
+        fallback = (lines, s)      # keep the last, i.e. the smallest scale
+    lines, s = fallback
+    return lines[:max(1, cell_h // (GLYPH_H * s))], s, 0
+
+
 def plot(text, cell_w, cell_h, scale=None, y=None):
-    """Yield (x, y) pixels for `text` centred in a cell."""
-    text, scale = fit(text, cell_w, scale)
-    x = (cell_w - text_width(text, scale)) // 2
-    if y is None:
-        y = (cell_h - GLYPH_H * scale) // 2
-    for ch in text:
-        cols = FONT[ch]
-        for c, bits in enumerate(cols):
-            for r in range(GLYPH_H):
-                if bits & (1 << r):
-                    for dx in range(scale):
-                        for dy in range(scale):
-                            yield x + c * scale + dx, y + r * scale + dy
-        x += (len(cols) + GAP) * scale
+    """Yield (x, y) pixels for `text` centred in a cell.
+
+    Multi-line: explicit newlines split, and anything still too wide is word
+    wrapped. Each line is centred horizontally, the block as a whole
+    vertically. Pass `y` to pin the top of the block instead.
+    """
+    lines, scale, lead = layout(text, cell_w, cell_h, scale)
+    step = GLYPH_H * scale + lead
+    block = len(lines) * GLYPH_H * scale + lead * (len(lines) - 1)
+    top = (cell_h - block) // 2 if y is None else y
+    for n, line in enumerate(lines):
+        x = (cell_w - text_width(line, scale)) // 2
+        base = top + n * step
+        for ch in line:
+            cols = FONT.get(ch) or FONT[FALLBACK]
+            for c, bits in enumerate(cols):
+                for r in range(GLYPH_H):
+                    if bits & (1 << r):
+                        for dx in range(scale):
+                            for dy in range(scale):
+                                yield x + c * scale + dx, base + r * scale + dy
+            x += (len(cols) + GAP) * scale
 
 
 def render(text, cell_w=64, cell_h=32, scale=None):

@@ -49,7 +49,7 @@ class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
                  bitmaps=False, blank=P.Colour.DIM, columns=8,
-                 dither="atkinson"):
+                 dither="atkinson", prefer_bitmaps=False):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -65,7 +65,9 @@ class SatelliteService:
         self.blank = blank
         self.columns = columns
         self.dither = dither
-        self._lock_warned = False
+        self.prefer_bitmaps = prefer_bitmaps
+        self._warned: set[str] = set()
+
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
         # Which surface owns each panel button, and its control.
@@ -107,19 +109,31 @@ class SatelliteService:
         if control.has_display:
             text = msg.b64("TEXT")
             rgb = proto.parse_colour(msg.get("COLOR"))
-            if text == "\U0001f512" and not self._lock_warned:
+            if text == "\U0001f512":
                 # Companion draws a lock onto every control of a locked surface
                 # when the client has not declared PINCODE_LOCK, so a padlock on
                 # everything means locked rather than a button that says "lock".
-                self._lock_warned = True
-                self.log("note: every key is a padlock, so these surfaces are "
-                         "locked in Companion. Unlock them there to see content.")
-            if text:
-                self.panel.set_cell_text(control.cell, text.replace("\\n", " "))
-            elif msg.get("BITMAP"):
-                self._draw_bitmap(control.cell, msg)
-            else:
-                self.panel.clear_cell(control.cell)
+                self._warn_once("locked",
+                                "every key is a padlock, so these surfaces are "
+                                "locked in Companion. Unlock them there to see "
+                                "content.")
+            bitmap = msg.get("BITMAP")
+            drew = (bitmap and (self.prefer_bitmaps or not text)
+                    and self._draw_bitmap(control.cell, msg))
+            if not drew:
+                if text:
+                    # Newlines are the font's job: it wraps and picks a scale
+                    # to suit, and a 64x32 cell holds four lines at scale 1.
+                    self.panel.set_cell_text(control.cell, text)
+                else:
+                    self.panel.clear_cell(control.cell)
+                    if self.bitmaps and not bitmap:
+                        self._warn_once("nobitmap",
+                            "a display control arrived with neither TEXT nor "
+                            f"BITMAP (fields: {sorted(msg.args)}). Bitmaps were "
+                            "requested, so if none ever arrive this Companion "
+                            "may not accept BITMAP_FORMAT=rgb - check the caps "
+                            "line above.")
             has_content = bool(text) or bool(msg.get("BITMAP")) or bool(rgb and max(rgb))
             self.panel.set_colour(control.cell,
                                   backlight(rgb, has_content, self.blank))
@@ -130,25 +144,41 @@ class SatelliteService:
                                P.Led.GREEN if msg.flag("PRESSED") else P.Led.OFF)
             self._dirty_leds = True
 
-    def _draw_bitmap(self, cell, msg):
-        """Fallback when a button has no text: dither the bitmap to 1bpp.
+    def _warn_once(self, key: str, message: str) -> None:
+        """Say something the first time only. The panel loop runs at 300 Hz."""
+        if key not in self._warned:
+            self._warned.add(key)
+            self.log(f"note: {message}")
+
+    def _draw_bitmap(self, cell, msg) -> bool:
+        """Dither a Companion bitmap onto a cell. False if it could not be used.
 
         Inverted, because Companion draws buttons light-on-dark and the panel
         is the other way round - so a bitmap comes out looking like the text
         the cell would otherwise be showing, not a photographic negative of it.
         """
         import base64
+        payload = msg.get("BITMAP")
         try:
-            raw = base64.b64decode(msg.get("BITMAP"))
+            raw = base64.b64decode(payload, validate=True)
         except Exception:
-            return
+            self._warn_once("b64", "BITMAP is not plain base64 - it starts "
+                            f"{str(payload)[:24]!r}. A data: URL means Companion "
+                            "did not accept BITMAP_FORMAT=rgb.")
+            return False
         dims = img.guess_dims(len(raw))
         if dims is None:
-            return
+            self._warn_once("dims", f"BITMAP is {len(raw)} bytes ({len(raw) // 3} "
+                            f"pixels), which is neither the {P.CELL_W}x{P.CELL_H} "
+                            "asked for nor square; skipping rather than shearing it.")
+            return False
         sw, sh = dims
+        self._warn_once("ok", f"bitmaps are arriving, {sw}x{sh}, "
+                              f"{self.dither} dithering")
         self.panel.set_bitmap(cell, img.to_cell(
             img.luma_from_rgb(raw), sw, sh,
             dither=self.dither, fit="cover", invert=True, levels=True))
+        return True
 
     # -- inward: panel -> Companion ----------------------------------------
 
@@ -216,7 +246,11 @@ class SatelliteService:
                         pass
                     elif msg.status == "OK":
                         pass          # routine acknowledgement
-                    elif msg.command in ("BRIGHTNESS", "KEYS-CLEAR", "CAPS"):
+                    elif msg.command == "CAPS":
+                        # Advertises what this Companion supports, including
+                        # the bitmap formats it will actually encode.
+                        self.log(f"   caps: {dict(msg.args)}")
+                    elif msg.command in ("BRIGHTNESS", "KEYS-CLEAR"):
                         pass
                     elif msg.command not in ("PONG", "KEY-STATE"):
                         self.log(f"   unhandled: {msg.command} {msg.status or ''} "

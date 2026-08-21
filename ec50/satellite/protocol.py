@@ -101,6 +101,20 @@ def encode(command: str, **params) -> bytes:
     return (" ".join(parts) + "\n").encode("utf-8")
 
 
+def trim(line: str, limit: int = 48) -> str:
+    """Shorten long argument values so a debug log stays readable.
+
+    One BITMAP is 8 KB of base64 and would bury every other line in the log.
+    """
+    out = []
+    for token in line.rstrip().split(" "):
+        key, sep, value = token.partition("=")
+        if sep and len(value) > limit:
+            value = f"<{len(value)} chars>"
+        out.append(f"{key}{sep}{value}")
+    return " ".join(out)
+
+
 def b64_json(obj) -> str:
     return base64.b64encode(json.dumps(obj).encode("utf-8")).decode("ascii")
 

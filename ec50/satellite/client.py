@@ -108,7 +108,7 @@ class SatelliteClient:
             return
         line = proto.encode(command, **params)
         if self.debug:
-            self.log(f"  >> {line.decode('utf-8', 'replace').rstrip()}")
+            self.log(f"  >> {proto.trim(line.decode('utf-8', 'replace'))}")
         try:
             self.sock.sendall(line)
         except OSError as e:
@@ -144,7 +144,7 @@ class SatelliteClient:
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
             if self.debug:
-                self.log(f"  << {line.decode('utf-8', 'replace').rstrip()}")
+                self.log(f"  << {proto.trim(line.decode('utf-8', 'replace'))}")
             msg = proto.decode(line.decode("utf-8", "replace"))
             if msg is None:
                 continue

@@ -162,7 +162,8 @@ def cmd_satellite(panel, args):
     SatelliteService(args.host, args.port, panel=panel, init=False,
                      debug=args.debug, bitmaps=args.bitmaps,
                      blank=BLANK_STYLES[args.blank], columns=args.columns,
-                     dither=args.dither).run()
+                     dither=args.dither,
+                     prefer_bitmaps=args.prefer_bitmaps).run()
 
 
 def cmd_vegas(panel, args):
@@ -222,6 +223,10 @@ def main():
                     help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",
                     help="also request button bitmaps as a fallback for keys with no text")
+    ap.add_argument("--prefer-bitmaps", action="store_true",
+                    help="draw the bitmap even when the button also has text "
+                         "(implies --bitmaps); use it for buttons whose style "
+                         "is an image layer")
     ap.add_argument("--dither", choices=img.DITHERS, default=None, metavar="MODE",
                     help="how to reduce greys to ink: " + ", ".join(img.DITHERS)
                          + ". Default atkinson; bayer is ~3x cheaper if a page "
@@ -241,6 +246,8 @@ def main():
     args = ap.parse_args()
     if args.dither is None:
         args.dither = "atkinson"
+    if args.prefer_bitmaps:
+        args.bitmaps = True
 
     if args.command == "image" and args.preview:
         return cmd_image(None, args)          # no hardware needed to look at it
