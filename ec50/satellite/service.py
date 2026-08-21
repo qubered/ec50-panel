@@ -114,10 +114,12 @@ class SatelliteService:
         if leds not in LED_MODES:
             raise ValueError(f"leds must be one of {LED_MODES}")
         self.leds = leds
-        # Asking for LED colours needs a Companion new enough to have `leds` in
-        # its layout schema. If it is not, ADD-DEVICE is rejected outright, so
-        # drop the request and register again rather than sitting disconnected.
-        self._ask_leds = leds != "off"
+        # `leds` is not in any released Companion - 5.0.3, the newest as of
+        # writing, validates the manifest against a JSON Schema with
+        # additionalProperties:false, so the field is rejected outright and
+        # takes the whole surface with it. Asking is therefore opt-in. A
+        # Companion that sends LEDS unprompted is still obeyed below.
+        self._ask_leds = leds == "gauge"
         self._retrying = False
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
@@ -202,8 +204,9 @@ class SatelliteService:
 
         Three sources, because no single one covers the panel. A Gauge style
         layer is the honest answer - it is a feedback, it is per key, and it is
-        what Companion sends LEDS for - but it only exists if the user has put
-        one on the button. Failing that, a key with no display has nowhere else
+        what Companion sends LEDS for - but no released Companion supports it
+        yet, so `--leds gauge` has to ask. Failing that, a key with no display
+        has nowhere else
         to show its background colour, so the colour drives the lamp. A key
         that does have a display shows its colour on the backlight already, so
         its lamp reports PRESSED instead.
@@ -216,6 +219,8 @@ class SatelliteService:
         if self.leds == "off":
             return P.Led.OFF
         if self.leds in ("auto", "gauge"):
+            # Only `gauge` asks for these, but obey them wherever they appear:
+            # a Companion new enough to send them unprompted should be heard.
             gauge = gauge_colour(msg.get("LEDS"))
             if gauge is not None and max(gauge) >= LED_FLOOR:
                 self._warn_once("gauge", "a Gauge style layer is driving the key "
@@ -331,11 +336,11 @@ class SatelliteService:
                             self._ask_leds = False
                             self._retrying = True
                             self.log("note: Companion rejected the layout "
-                                     f"({msg.get('MESSAGE', msg.args)}). Most "
-                                     "likely it predates LED colours in the "
-                                     "satellite schema; registering again "
-                                     "without them. Key lamps fall back to "
-                                     "button colour and pressed state.")
+                                     f"({msg.get('MESSAGE', msg.args)}) - this "
+                                     "build has no `leds` in its satellite "
+                                     "schema. Registering again without it; "
+                                     "key lamps fall back to button colour and "
+                                     "pressed state.")
                             self._register()
                         elif not self._retrying:
                             self.log(f"!! Companion rejected {msg.command}: "

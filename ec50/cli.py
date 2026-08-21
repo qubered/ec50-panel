@@ -240,11 +240,13 @@ def main():
                     help="also request button bitmaps as a fallback for keys with no text")
     ap.add_argument("--leds", choices=("auto", "gauge", "colour", "pressed", "off"),
                     default="auto", metavar="MODE",
-                    help="what the key lamps report: gauge (a Companion style "
-                         "layer whose usage is Gauge), colour (the button's "
-                         "background), pressed, or off. Default auto - gauge "
-                         "when there is one, otherwise colour for keys with no "
-                         "display and pressed for keys that have one.")
+                    help="what the key lamps report. Default auto: the button's "
+                         "background colour for keys with no display, pressed "
+                         "state for keys that have one. `gauge` additionally "
+                         "asks Companion for the colour of a style layer whose "
+                         "usage is Gauge, which needs a build newer than 5.0.3; "
+                         "on anything older the layout is rejected and it falls "
+                         "back to auto. Also colour, pressed, off.")
     ap.add_argument("--prefer-bitmaps", action="store_true",
                     help="draw the bitmap even when the button also has text "
                          "(implies --bitmaps); use it for buttons whose style "

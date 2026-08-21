@@ -124,16 +124,22 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 4. **Key LED** — 72 of the 82 keys have a lamp, two bits wide: red, green or
    off. Three sources, in order (`--leds auto|gauge|colour|pressed|off`):
 
-   1. **A Gauge style layer.** Set a button style layer's usage to Gauge and
-      Companion sends its colour as `LEDS`, raw RGB per segment, base64. This
-      is the one that is really a feedback: put a feedback on that layer and
-      the lamp follows it. The manifest asks for one segment, `mode: simple`,
-      on every control that has a lamp.
+   1. **A Gauge style layer**, if `--leds gauge` asks for it. Set a button
+      style layer's usage to Gauge and Companion sends its colour as `LEDS`,
+      raw RGB per segment, base64. This is the one that is really a feedback:
+      put a feedback on that layer and the lamp follows it.
 
-      `leds` is a recent addition to the satellite layout schema. A Companion
-      that does not know it rejects `ADD-DEVICE` outright, so a rejection is
-      taken as a version signal: the request is dropped and every surface
-      registers again without it, which leaves sources 2 and 3 working.
+      **No released Companion supports this yet.** `leds` exists only on
+      `main`; 5.0.3, the newest release, validates `LAYOUT_MANIFEST` against
+      `assets/satellite-surface.schema.json`, whose style preset carries
+      `"additionalProperties": false` — so the field is not ignored, it fails
+      the whole manifest with `Invalid LAYOUT_MANIFEST` and the surface never
+      registers. That is why asking is opt-in rather than the default.
+
+      A rejection is recovered from rather than fatal: the request is dropped
+      and every surface registers again without it. And `LEDS` is obeyed
+      wherever it appears, so a Companion new enough to send it unprompted
+      works without the flag.
    2. **The button's background `COLOR`**, for keys with no display. They have
       nowhere else to show it, so it drives the lamp instead: predominantly
       red is red, anything else bright enough is green. The panel has no blue
