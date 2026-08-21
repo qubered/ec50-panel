@@ -49,7 +49,7 @@ class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
                  bitmaps=False, blank=P.Colour.DIM, columns=8,
-                 dither="otsu", fit="contain", prefer_bitmaps=False):
+                 dither="auto", fit="contain", polarity="auto", prefer_bitmaps=False):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -66,6 +66,7 @@ class SatelliteService:
         self.columns = columns
         self.dither = dither
         self.fit = fit
+        self.polarity = polarity
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
 
@@ -152,11 +153,13 @@ class SatelliteService:
             self.log(f"note: {message}")
 
     def _draw_bitmap(self, cell, msg) -> bool:
-        """Dither a Companion bitmap onto a cell. False if it could not be used.
+        """Reduce a Companion bitmap to a cell. False if it could not be used.
 
-        Inverted, because Companion draws buttons light-on-dark and the panel
-        is the other way round - so a bitmap comes out looking like the text
-        the cell would otherwise be showing, not a photographic negative of it.
+        Polarity is chosen per picture rather than fixed. Companion draws its
+        buttons light-on-dark and the panel is dark-on-lit, so most artwork
+        wants inverting - but a photograph does not, and inverting one turns it
+        into a negative. Whichever way leaves less ink is the right way round:
+        the majority tone is the one that should stay lit.
         """
         import base64
         payload = msg.get("BITMAP")
@@ -178,7 +181,8 @@ class SatelliteService:
                               f"{self.dither} dithering")
         self.panel.set_bitmap(cell, img.to_cell(
             img.luma_from_rgb(raw), sw, sh,
-            dither=self.dither, fit=self.fit, invert=True, levels=True))
+            dither=self.dither, fit=self.fit,
+            polarity=self.polarity, levels=True))
         return True
 
     # -- inward: panel -> Companion ----------------------------------------

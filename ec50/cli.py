@@ -142,18 +142,22 @@ def cmd_image(panel, args):
     if args.levels:
         plane = img.autolevel(plane)
     amount = (args.sharpen if args.sharpen is not None
-              else (1.0 if args.dither in img.THRESHOLDS else 0.0))
+              else (1.0 if args.dither in img.THRESHOLDS + ("auto",) else 0.0))
     if amount:
         plane = img.sharpen(plane, tw, th, amount)
-    bits = img.to_bits(plane, tw, th, args.dither, args.threshold, args.invert)
+    dither = img.pick_dither(plane) if args.dither == "auto" else args.dither
+    bits = img.to_bits(plane, tw, th, dither, args.threshold,
+                       args.polarity == "light")
+    if args.polarity == "auto" and sum(bits) * 2 > len(bits):
+        bits = img.to_bits(plane, tw, th, dither, args.threshold, True)
 
     if args.preview:
         framed = bytearray(fw * fh)
         for y in range(max(0, oy), min(fh, oy + th)):
             for x in range(max(0, ox), min(fw, ox + tw)):
                 framed[y * fw + x] = bits[(y - oy) * tw + (x - ox)]
-        print(f"{path}  {sw}x{sh} -> {tw}x{th} in {fw}x{fh}  {args.dither}"
-              f"{', inverted' if args.invert else ''}\n")
+        print(f"{path}  {sw}x{sh} -> {tw}x{th} in {fw}x{fh}  {dither}"
+              f", {args.polarity} polarity\n")
         print(img.preview(framed, fw, fh))
         return
 
@@ -165,7 +169,7 @@ def cmd_image(panel, args):
         panel.set_colour(cell, colour)
     panel.flush()
     print(f"drew {path} ({sw}x{sh}) over {len(cells)} cell"
-          f"{'s' if len(cells) != 1 else ''}, {args.dither}.")
+          f"{'s' if len(cells) != 1 else ''}, {dither}.")
 
 
 def cmd_satellite(panel, args):
@@ -173,7 +177,7 @@ def cmd_satellite(panel, args):
     SatelliteService(args.host, args.port, panel=panel, init=False,
                      debug=args.debug, bitmaps=args.bitmaps,
                      blank=BLANK_STYLES[args.blank], columns=args.columns,
-                     dither=args.dither, fit=args.fit,
+                     dither=args.dither, fit=args.fit, polarity=args.polarity,
                      prefer_bitmaps=args.prefer_bitmaps).run()
 
 
@@ -240,10 +244,8 @@ def main():
                          "is an image layer")
     ap.add_argument("--dither", choices=img.DITHERS, default=None, metavar="MODE",
                     help="how to reduce greys to ink: " + ", ".join(img.DITHERS)
-                         + ". Default otsu, which picks the cut that best "
-                           "splits the histogram - flat areas stay flat and "
-                           "shapes stay crisp. Try adaptive for photographs, "
-                           "and the diffusion modes for continuous tone.")
+                         + ". Default auto, which reads the histogram: a hard "
+                           "cut for flat artwork, a local one for photographs.")
     ap.add_argument("--fit", choices=img.FITS, default="contain",
                     help="how a picture fills its frame (default contain, which "
                          "letterboxes rather than cropping)")
@@ -253,8 +255,13 @@ def main():
                          "threshold modes, 0 for dithers)")
     ap.add_argument("--cell", type=int, metavar="N",
                     help="draw into one cell 0-44 instead of the whole Assign grid")
+    ap.add_argument("--polarity", choices=img.POLARITIES, default="auto",
+                    help="which tone becomes ink: dark inks the dark parts (a "
+                         "photograph), light inks the light parts (artwork drawn "
+                         "light-on-dark). Default auto, whichever leaves less "
+                         "ink, since the majority tone should stay lit.")
     ap.add_argument("--invert", action="store_true",
-                    help="ink where the source is light, not dark")
+                    help="shorthand for --polarity light")
     ap.add_argument("--levels", action="store_true",
                     help="stretch contrast to the full range before dithering")
     ap.add_argument("--threshold", type=int, default=128, metavar="N",
@@ -263,9 +270,11 @@ def main():
                     help="print `image` to the terminal instead; needs no panel")
     args = ap.parse_args()
     if args.dither is None:
-        args.dither = "otsu"
+        args.dither = "auto"
     if args.prefer_bitmaps:
         args.bitmaps = True
+    if args.invert:
+        args.polarity = "light"
 
     if args.command == "image" and args.preview:
         return cmd_image(None, args)          # no hardware needed to look at it

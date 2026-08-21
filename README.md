@@ -122,34 +122,45 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
 
 The cells are one bit deep, so a picture has to be reduced to ink or nothing.
 `ec50.image` does it in four steps — luma, box-filtered resample, sharpen, then
-a threshold — and which threshold matters more than anything else.
+a threshold. Two of those choices are made per picture, because there is no
+single right answer.
 
-**Otsu** (the default) picks the cut that best separates the histogram into two
-classes. Flat areas stay flat and shapes stay crisp, which is what a logo, an
-icon or a screenful of text needs. **Adaptive** compares each pixel to its own
-neighbourhood instead, so detail survives in the bright and dark parts of the
-same picture. The **diffusion** modes (`atkinson`, `floyd`, `bayer`) keep grey
-as texture, which suits continuous tone and wrecks anything flat — a solid
-background comes out as noise.
+**Which threshold.** Flat artwork — a logo, an icon, a screen of text — wants
+one hard cut, placed by Otsu's method: flat areas stay flat and shapes stay
+crisp. A photograph wants a threshold that varies across the picture, so detail
+survives at both ends of the range. `--dither auto` (the default) reads the
+histogram and picks between them: it measures how cleanly a single cut would
+separate the tones, and how many grey levels the picture actually occupies. A
+logo scores two tones and near-perfect separation; a photograph spreads across
+most of the range. The `atkinson`, `floyd` and `bayer` modes keep grey as
+texture, which suits continuous tone and wrecks anything flat.
 
-Two details do most of the work. The picture is scaled on its own and only then
-dropped into the cell, so letterbox padding never reaches the threshold: mix the
-two and a local threshold sees bright padding beside the picture's edge, decides
-the edge is dark by comparison, and draws a hard line down the join. And an
-unsharp mask runs before the threshold, because box-filtering a 72 × 72 button
-down to a 64 × 32 cell averages a one-pixel stroke into mid grey that the cut
-then drops — adding back the difference from the local mean puts it back.
+**Which way round.** A set pixel is dark on a lit backlight. Companion draws its
+buttons light-on-dark, so most artwork wants inverting — white text becomes dark
+text on a lit key, matching the font. A photograph does not, and inverting one
+turns it into a negative. `--polarity auto` (the default) takes whichever way
+leaves less ink, so the majority tone stays lit.
+
+Two details do the rest. The picture is scaled on its own and only then dropped
+into the cell, so letterbox padding never reaches the threshold: mix the two and
+a local threshold sees bright padding beside the picture's edge, decides the edge
+is dark by comparison, and draws a hard line down the join. And the unsharp mask
+runs before the threshold, because box-filtering a 72 × 72 button down to a
+64 × 32 cell averages a one-pixel stroke into mid grey that the cut then drops.
 
 ```bash
 python -m ec50 image logo.png                      # across the whole Assign grid
 python -m ec50 image logo.png --cell 5             # into one cell
 python -m ec50 image logo.png --preview            # to the terminal instead
-python -m ec50 image photo.png --dither adaptive --levels --fit cover
+python -m ec50 image photo.png --fit cover --levels
 ```
 
-`--dither otsu|adaptive|atkinson|floyd|bayer|none`, `--fit contain|cover|stretch`,
-`--levels` to stretch contrast first, `--sharpen N` to override the unsharp
-amount, `--invert` for ink where the source is light.
+`--dither auto|otsu|adaptive|atkinson|floyd|bayer|none`,
+`--polarity auto|dark|light`, `--fit contain|cover|stretch`, `--levels` to
+stretch contrast first, `--sharpen N` to override the unsharp amount.
+
+`--fit cover` is worth trying on a portrait: the cell is 2:1 and a square photo
+letterboxed into it only uses half the width.
 
 Spanning the grid thresholds one frame and then cuts it into cells, rather than
 doing each cell separately — otherwise every cell picks its own threshold and

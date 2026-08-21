@@ -90,14 +90,16 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 1. **Text present** → render with the built-in font at native 64 × 32. Crisp, uses
    the full 2:1 cell, and emoji fold to the icon set.
 2. **No text** → reduce the bitmap to 64 × 32 1-bit through `ec50.image`: luma,
-   box-filtered resample, contrast stretch, unsharp, then Otsu's threshold.
-   Otsu rather than error diffusion because Companion buttons are mostly flat
-   colour with a logo or some text on it, and diffusion turns flat colour into
-   noise. `--dither adaptive` suits photographs, the diffusion modes suit
-   continuous tone. It is
-   **inverted** on the way, because Companion draws buttons light-on-dark and
-   the panel is dark-on-lit — so a bitmap comes out looking like the text the
-   cell would otherwise show, not a photographic negative of it.
+   box-filtered resample, contrast stretch, unsharp, then a threshold chosen
+   per picture. A button that is flat colour with a logo on it gets one hard
+   cut; a photograph gets a local one. Error diffusion is not the default
+   because it turns flat colour into noise, which is most of what a Companion
+   button is. It is
+   **inverted when that leaves less ink**. Companion draws buttons light-on-dark
+   and the panel is dark-on-lit, so most artwork wants inverting: white text
+   becomes dark text on a lit key, matching what the font would have drawn. A
+   photograph is the exception — inverting one turns it into a negative — so
+   the polarity is picked per picture rather than fixed.
 
    Bitmaps are **opt-in** via `--bitmaps`: requesting them costs roughly 8 KB
    per key, some 360 KB for a full 45-cell refresh, for pixels that are usually

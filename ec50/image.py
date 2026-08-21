@@ -1,22 +1,29 @@
 """Pictures on a one-bit panel.
 
 A cell is 64x32 and every pixel is either ink or nothing, so a photograph has to
-survive being reduced to two levels. Three steps, in order:
+survive being reduced to two levels. Four steps, in order:
 
   1. luma      - colour collapses to brightness
   2. resample  - a box filter down to the cell, averaging whole source blocks
                  rather than point-sampling, so detail turns into grey instead
                  of aliasing away
-  3. dither    - the grey becomes texture
+  3. sharpen   - an unsharp mask against a box blur, putting back the contrast
+                 the downscale averaged out of thin strokes
+  4. threshold - grey becomes ink or nothing
 
-Step 3 is what makes it work. A plain threshold throws away every mid tone;
-dithering pushes the quantisation error into the neighbours that have not been
-decided yet, so a 50% grey comes out as a checkerboard rather than a flat block.
+Step 4 is the one that decides how it looks, and there is no single right
+answer. Flat artwork - a logo, an icon, a screen of text - wants one hard cut,
+placed by Otsu's method; error diffusion would turn its flat areas into noise.
+A photograph wants a threshold that varies across the picture, so detail
+survives at both ends of the range. `dither="auto"` reads the histogram and
+picks: two clean tones get the hard cut, anything else gets the local one.
 
-Ink convention: a set pixel is DARK on a lit backlight, the same as the font.
-So ink lands where the source is dark. Companion buttons are drawn light-on-dark
-and want `invert=True`, which is the default on that path - it keeps a bitmap
-looking like the text the panel would otherwise be showing.
+Polarity is the other half of it, and also not fixed. A set pixel is DARK on a
+lit backlight. Companion draws its buttons light-on-dark, so most artwork wants
+inverting - white text becomes dark text on a lit key, matching the font. But a
+photograph does not, and inverting one turns it into a negative. `polarity=
+"auto"` takes whichever way round leaves less ink, so the majority tone is the
+one that stays lit.
 """
 
 from __future__ import annotations
@@ -26,7 +33,8 @@ import zlib
 
 from . import protocol as P
 
-DITHERS = ("otsu", "adaptive", "atkinson", "floyd", "bayer", "none")
+DITHERS = ("auto", "otsu", "adaptive", "atkinson", "floyd", "bayer", "none")
+POLARITIES = ("auto", "dark", "light")
 FITS = ("contain", "cover", "stretch")
 
 # 8x8 ordered dither, the classic recursive Bayer matrix. Values 0-63.
@@ -90,19 +98,28 @@ def autolevel(luma: bytearray, clip: float = 0.01) -> bytearray:
     return bytearray(lut[v] for v in luma)
 
 
-def otsu(luma) -> int:
-    """The threshold that best splits the histogram into two classes.
+def otsu_stats(luma):
+    """Otsu's cut, and how cleanly it separates: (threshold, 0.0-1.0).
 
-    Companion buttons are mostly flat colour with a logo or icon on top, and
-    error diffusion turns those flat areas into noise. A cut in the right place
-    keeps the shape instead - the trick is finding it, and Otsu does that by
-    maximising the variance between the two sides.
+    The threshold is the first level of the upper class, so it is used with
+    `<` rather than `<=`. That matters at the ends: a button that is flat
+    black behind flat white splits at level 0, and comparing `v < 0` inks
+    nothing at all - the cell comes out blank.
+
+    The second number is the between-class variance over the total. Near 1
+    means two well-separated tones - a logo, an icon, a screen of text - and a
+    threshold will render it exactly. Low means continuous tone, where a single
+    cut has to throw away everything on the wrong side of it.
     """
     hist = [0] * 256
     for v in luma:
         hist[v] += 1
     total = len(luma)
+    if not total:
+        return 128, 0.0
     grand = sum(i * hist[i] for i in range(256))
+    mean = grand / total
+    variance = sum(hist[i] * (i - mean) ** 2 for i in range(256)) / total
     below = weight = 0
     best, cut = -1.0, 128
     for t in range(256):
@@ -116,7 +133,49 @@ def otsu(luma) -> int:
         spread = weight * rest * (below / weight - (grand - below) / rest) ** 2
         if spread > best:
             best, cut = spread, t
-    return cut
+    if variance <= 0 or best <= 0:
+        return cut + 1, 0.0
+    return cut + 1, min(1.0, (best / total ** 2) / variance)
+
+
+def tone_count(luma, bins: int = 16, floor: float = 0.02) -> int:
+    """How many coarse grey levels the picture actually occupies.
+
+    Separability alone cannot tell flat artwork from a photograph - a linear
+    ramp scores about 0.75 against a logo's 0.98, which is far too close to
+    split on. Counting tones does: a logo or a screen of text lives in two or
+    three buckets, a photograph spreads across most of them.
+    """
+    hist = [0] * bins
+    for v in luma:
+        hist[v * bins // 256] += 1
+    cut = len(luma) * floor
+    return sum(1 for n in hist if n > cut)
+
+
+# Two clean tones and a hard cut loses nothing. Anything else has mid tones
+# worth keeping, and wants a threshold that varies across the picture.
+BIMODAL = 0.85
+FLAT_TONES = 5
+
+
+def pick_dither(luma) -> str:
+    """Choose between a hard cut and a local one by looking at the histogram."""
+    _, separability = otsu_stats(luma)
+    if separability >= BIMODAL and tone_count(luma) <= FLAT_TONES:
+        return "otsu"
+    return "adaptive"
+
+
+def otsu(luma) -> int:
+    """The threshold that best splits the histogram into two classes.
+
+    Companion buttons are mostly flat colour with a logo or icon on top, and
+    error diffusion turns those flat areas into noise. A cut in the right place
+    keeps the shape instead - the trick is finding it, and Otsu does that by
+    maximising the variance between the two sides.
+    """
+    return otsu_stats(luma)[0]
 
 
 def _integral(luma, w: int, h: int):
@@ -237,9 +296,16 @@ def place(src, sw: int, sh: int, dw: int, dh: int,
 
 def to_bits(luma, w: int, h: int, dither: str = "atkinson",
             threshold: int = 128, invert: bool = False) -> bytearray:
-    """One byte per pixel, 1 where ink goes."""
+    """One byte per pixel, 1 where ink goes.
+
+    `invert=False` inks where the source is dark, which is what a photograph
+    wants. `invert=True` inks where it is light, which is what light-on-dark
+    artwork wants.
+    """
     if dither not in DITHERS:
         raise ValueError(f"dither must be one of {DITHERS}")
+    if dither == "auto":
+        dither = pick_dither(luma)
     if invert:
         luma = bytearray(255 - v for v in luma)
     bits = bytearray(w * h)
@@ -306,8 +372,8 @@ def pack(bits, w: int, h: int, ox: int = 0, oy: int = 0) -> bytes:
 THRESHOLDS = ("otsu", "none", "adaptive")
 
 
-def to_cell(luma, sw: int, sh: int, dither: str = "otsu",
-            fit: str = "contain", invert: bool = False,
+def to_cell(luma, sw: int, sh: int, dither: str = "auto",
+            fit: str = "contain", polarity: str = "auto",
             threshold: int = 128, levels: bool = False,
             sharpen_amount: float | None = None) -> bytes:
     """The whole pipeline for one cell, ready for `EC50.set_bitmap`.
@@ -317,6 +383,8 @@ def to_cell(luma, sw: int, sh: int, dither: str = "otsu",
     a hard line down the join: a local threshold sees bright padding beside the
     picture's edge, decides the edge is dark by comparison, and inks it.
     """
+    if polarity not in POLARITIES:
+        raise ValueError(f"polarity must be one of {POLARITIES}")
     ox, oy, tw, th = fit_box(sw, sh, P.CELL_W, P.CELL_H, fit)
     small = resample(luma, sw, sh, tw, th)
     if levels:
@@ -325,8 +393,15 @@ def to_cell(luma, sw: int, sh: int, dither: str = "otsu",
         sharpen_amount = 1.0 if dither in THRESHOLDS else 0.0
     if sharpen_amount:
         small = sharpen(small, tw, th, sharpen_amount)
-    return pack_at(to_bits(small, tw, th, dither, threshold, invert),
-                   tw, th, ox, oy)
+
+    bits = to_bits(small, tw, th, dither, threshold, polarity == "light")
+    if polarity == "auto" and sum(bits) * 2 > len(bits):
+        # Whichever way round leaves less ink. A set pixel is dark on a lit
+        # backlight, so the majority tone should be the one that stays lit:
+        # white text on a black button becomes dark text on a lit key, and a
+        # dark cat on a pale wall stays a dark cat instead of a negative.
+        bits = to_bits(small, tw, th, dither, threshold, True)
+    return pack_at(bits, tw, th, ox, oy)
 
 
 def guess_dims(nbytes: int, prefer=(P.CELL_W, P.CELL_H)):
