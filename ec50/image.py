@@ -26,7 +26,7 @@ import zlib
 
 from . import protocol as P
 
-DITHERS = ("atkinson", "floyd", "bayer", "none")
+DITHERS = ("otsu", "adaptive", "atkinson", "floyd", "bayer", "none")
 FITS = ("contain", "cover", "stretch")
 
 # 8x8 ordered dither, the classic recursive Bayer matrix. Values 0-63.
@@ -90,6 +90,96 @@ def autolevel(luma: bytearray, clip: float = 0.01) -> bytearray:
     return bytearray(lut[v] for v in luma)
 
 
+def otsu(luma) -> int:
+    """The threshold that best splits the histogram into two classes.
+
+    Companion buttons are mostly flat colour with a logo or icon on top, and
+    error diffusion turns those flat areas into noise. A cut in the right place
+    keeps the shape instead - the trick is finding it, and Otsu does that by
+    maximising the variance between the two sides.
+    """
+    hist = [0] * 256
+    for v in luma:
+        hist[v] += 1
+    total = len(luma)
+    grand = sum(i * hist[i] for i in range(256))
+    below = weight = 0
+    best, cut = -1.0, 128
+    for t in range(256):
+        weight += hist[t]
+        if weight == 0:
+            continue
+        rest = total - weight
+        if rest == 0:
+            break
+        below += t * hist[t]
+        spread = weight * rest * (below / weight - (grand - below) / rest) ** 2
+        if spread > best:
+            best, cut = spread, t
+    return cut
+
+
+def _integral(luma, w: int, h: int):
+    """Summed-area table, so a window mean costs four lookups."""
+    stride = w + 1
+    out = [0] * (stride * (h + 1))
+    for y in range(h):
+        run = 0
+        base, above = (y + 1) * stride, y * stride
+        for x in range(w):
+            run += luma[y * w + x]
+            out[base + x + 1] = out[above + x + 1] + run
+    return out
+
+
+def sharpen(luma, w: int, h: int, amount: float = 1.0, radius: int = 2):
+    """Unsharp mask against a box blur, using the summed-area table.
+
+    Box-filtering a 72x72 button down to a 64x32 cell averages a one-pixel
+    stroke into mid grey, and a global threshold then drops it. Adding back
+    the difference from the local mean puts the contrast back before the cut,
+    and leaves flat areas alone because there a pixel equals its own mean.
+    """
+    if amount <= 0:
+        return luma
+    ii, stride = _integral(luma, w, h), w + 1
+    out = bytearray(w * h)
+    for y in range(h):
+        y0, y1 = max(0, y - radius), min(h - 1, y + radius)
+        top, bot = y0 * stride, (y1 + 1) * stride
+        for x in range(w):
+            x0, x1 = max(0, x - radius), min(w - 1, x + radius)
+            count = (x1 - x0 + 1) * (y1 - y0 + 1)
+            total = ii[bot + x1 + 1] - ii[top + x1 + 1] - ii[bot + x0] + ii[top + x0]
+            v = luma[y * w + x]
+            out[y * w + x] = min(255, max(0, int(v + amount * (v - total / count))))
+    return out
+
+
+def adaptive_bits(luma, w: int, h: int, radius: int = 0, bias: float = 0.15):
+    """Bradley's local mean threshold: ink where a pixel is darker than its
+    neighbourhood by `bias`.
+
+    A global cut loses whichever end of the range it is not aimed at - a dark
+    logo on a dark ground, or fine detail in a bright corner. Comparing against
+    the local mean keeps both, and flat areas stay clean because a pixel equal
+    to its own neighbourhood never clears the bias.
+    """
+    r = radius or max(2, min(w, h) // 8)
+    ii, stride = _integral(luma, w, h), w + 1
+    bits = bytearray(w * h)
+    for y in range(h):
+        y0, y1 = max(0, y - r), min(h - 1, y + r)
+        top, bot = y0 * stride, (y1 + 1) * stride
+        for x in range(w):
+            x0, x1 = max(0, x - r), min(w - 1, x + r)
+            count = (x1 - x0 + 1) * (y1 - y0 + 1)
+            total = ii[bot + x1 + 1] - ii[top + x1 + 1] - ii[bot + x0] + ii[top + x0]
+            if luma[y * w + x] * count < total * (1.0 - bias):
+                bits[y * w + x] = 1
+    return bits
+
+
 # -- geometry --------------------------------------------------------------
 
 def resample(src, sw: int, sh: int, dw: int, dh: int) -> bytearray:
@@ -114,16 +204,23 @@ def resample(src, sw: int, sh: int, dw: int, dh: int) -> bytearray:
     return out
 
 
+def fit_box(sw: int, sh: int, dw: int, dh: int, fit: str):
+    """Where the scaled picture lands: (ox, oy, tw, th) in destination pixels."""
+    if fit == "stretch" or (sw, sh) == (dw, dh):
+        return 0, 0, dw, dh
+    scale = min(dw / sw, dh / sh) if fit == "contain" else max(dw / sw, dh / sh)
+    tw, th = max(1, round(sw * scale)), max(1, round(sh * scale))
+    return (dw - tw) // 2, (dh - th) // 2, tw, th
+
+
 def place(src, sw: int, sh: int, dw: int, dh: int,
           fit: str = "contain", pad: int = 255) -> bytearray:
     """Scale into a dw x dh frame. `contain` letterboxes, `cover` crops."""
     if fit == "stretch" or (sw, sh) == (dw, dh):
         return resample(src, sw, sh, dw, dh)
-    scale = min(dw / sw, dh / sh) if fit == "contain" else max(dw / sw, dh / sh)
-    tw, th = max(1, round(sw * scale)), max(1, round(sh * scale))
+    ox, oy, tw, th = fit_box(sw, sh, dw, dh, fit)
     tmp = resample(src, sw, sh, tw, th)
     out = bytearray([pad]) * (dw * dh)
-    ox, oy = (dw - tw) // 2, (dh - th) // 2
     for y in range(dh):
         sy = y - oy
         if not (0 <= sy < th):
@@ -147,10 +244,14 @@ def to_bits(luma, w: int, h: int, dither: str = "atkinson",
         luma = bytearray(255 - v for v in luma)
     bits = bytearray(w * h)
 
-    if dither == "none":
+    if dither in ("none", "otsu"):
+        cut = otsu(luma) if dither == "otsu" else threshold
         for i, v in enumerate(luma):
-            bits[i] = 1 if v < threshold else 0
+            bits[i] = 1 if v < cut else 0
         return bits
+
+    if dither == "adaptive":
+        return adaptive_bits(luma, w, h)
 
     if dither == "bayer":
         # Ordered: one table lookup per pixel and no feedback, so it is the
@@ -179,27 +280,53 @@ def to_bits(luma, w: int, h: int, dither: str = "atkinson",
     return bits
 
 
-def pack(bits, w: int, h: int, ox: int = 0, oy: int = 0) -> bytes:
-    """Cut a 64x32 cell bitmap out of a bit plane, at offset (ox, oy)."""
+def pack_at(bits, w: int, h: int, ox: int = 0, oy: int = 0) -> bytes:
+    """Pack a bit plane into a 64x32 cell with its top left at (ox, oy).
+
+    Negative offsets crop, positive ones letterbox, and whatever the picture
+    does not reach stays blank.
+    """
     out = bytearray(P.CELL_SIZE)
-    for y in range(min(P.CELL_H, h - oy)):
-        srow, drow = (y + oy) * w, y * P.CELL_STRIDE
-        for x in range(min(P.CELL_W, w - ox)):
-            if bits[srow + ox + x]:
+    for y in range(max(0, oy), min(P.CELL_H, oy + h)):
+        srow, drow = (y - oy) * w, y * P.CELL_STRIDE
+        for x in range(max(0, ox), min(P.CELL_W, ox + w)):
+            if bits[srow + x - ox]:
                 out[drow + (x >> 3)] |= 1 << (x & 7)   # bit 0 is leftmost
     return bytes(out)
 
 
-def to_cell(luma, sw: int, sh: int, dither: str = "atkinson",
+def pack(bits, w: int, h: int, ox: int = 0, oy: int = 0) -> bytes:
+    """Cut a 64x32 cell out of a larger bit plane, at offset (ox, oy)."""
+    return pack_at(bits, w, h, -ox, -oy)
+
+
+# Sharpening helps a threshold recover detail the downscale averaged away.
+# It does the opposite for error diffusion, which already carries that detail
+# as texture and only gets noisier for the help.
+THRESHOLDS = ("otsu", "none", "adaptive")
+
+
+def to_cell(luma, sw: int, sh: int, dither: str = "otsu",
             fit: str = "contain", invert: bool = False,
-            threshold: int = 128, levels: bool = False) -> bytes:
-    """The whole pipeline for one cell, ready for `EC50.set_bitmap`."""
-    scaled = place(luma, sw, sh, P.CELL_W, P.CELL_H, fit,
-                   pad=0 if invert else 255)
+            threshold: int = 128, levels: bool = False,
+            sharpen_amount: float | None = None) -> bytes:
+    """The whole pipeline for one cell, ready for `EC50.set_bitmap`.
+
+    The picture is scaled on its own and only then dropped into the cell, so
+    letterbox padding never reaches the threshold. Mixing the two is what puts
+    a hard line down the join: a local threshold sees bright padding beside the
+    picture's edge, decides the edge is dark by comparison, and inks it.
+    """
+    ox, oy, tw, th = fit_box(sw, sh, P.CELL_W, P.CELL_H, fit)
+    small = resample(luma, sw, sh, tw, th)
     if levels:
-        scaled = autolevel(scaled)
-    return pack(to_bits(scaled, P.CELL_W, P.CELL_H, dither, threshold, invert),
-                P.CELL_W, P.CELL_H)
+        small = autolevel(small)
+    if sharpen_amount is None:
+        sharpen_amount = 1.0 if dither in THRESHOLDS else 0.0
+    if sharpen_amount:
+        small = sharpen(small, tw, th, sharpen_amount)
+    return pack_at(to_bits(small, tw, th, dither, threshold, invert),
+                   tw, th, ox, oy)
 
 
 def guess_dims(nbytes: int, prefer=(P.CELL_W, P.CELL_H)):

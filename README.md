@@ -120,27 +120,40 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
 
 ## Pictures
 
-The cells are one bit deep, so a photograph has to be reduced to ink or nothing.
-`ec50.image` does it in three steps — luma, box-filtered resample, then dither —
-and the dither is what makes it work. A plain threshold throws away every mid
-tone; error diffusion scatters the quantisation error into the neighbours that
-have not been decided yet, so grey survives as texture.
+The cells are one bit deep, so a picture has to be reduced to ink or nothing.
+`ec50.image` does it in four steps — luma, box-filtered resample, sharpen, then
+a threshold — and which threshold matters more than anything else.
+
+**Otsu** (the default) picks the cut that best separates the histogram into two
+classes. Flat areas stay flat and shapes stay crisp, which is what a logo, an
+icon or a screenful of text needs. **Adaptive** compares each pixel to its own
+neighbourhood instead, so detail survives in the bright and dark parts of the
+same picture. The **diffusion** modes (`atkinson`, `floyd`, `bayer`) keep grey
+as texture, which suits continuous tone and wrecks anything flat — a solid
+background comes out as noise.
+
+Two details do most of the work. The picture is scaled on its own and only then
+dropped into the cell, so letterbox padding never reaches the threshold: mix the
+two and a local threshold sees bright padding beside the picture's edge, decides
+the edge is dark by comparison, and draws a hard line down the join. And an
+unsharp mask runs before the threshold, because box-filtering a 72 × 72 button
+down to a 64 × 32 cell averages a one-pixel stroke into mid grey that the cut
+then drops — adding back the difference from the local mean puts it back.
 
 ```bash
 python -m ec50 image logo.png                      # across the whole Assign grid
 python -m ec50 image logo.png --cell 5             # into one cell
 python -m ec50 image logo.png --preview            # to the terminal instead
-python -m ec50 image photo.png --dither floyd --levels --fit cover
+python -m ec50 image photo.png --dither adaptive --levels --fit cover
 ```
 
-`--dither atkinson|floyd|bayer|none` (default `atkinson`, which throws away part
-of the error on purpose — clipping to solid black and white reads better on a
-64 × 32 cell than a faithful mush). `--fit contain|cover|stretch`, `--levels` to
-stretch contrast first, `--invert` for ink where the source is light.
+`--dither otsu|adaptive|atkinson|floyd|bayer|none`, `--fit contain|cover|stretch`,
+`--levels` to stretch contrast first, `--sharpen N` to override the unsharp
+amount, `--invert` for ink where the source is light.
 
-Spanning the grid dithers one 768 × 96 frame and then cuts it into cells, rather
-than dithering each cell separately — otherwise the error diffusion restarts at
-every seam and the joins show as a grid of hard edges.
+Spanning the grid thresholds one frame and then cuts it into cells, rather than
+doing each cell separately — otherwise every cell picks its own threshold and
+the joins show as a grid of hard edges.
 
 Reading a PNG needs nothing but the standard library; Pillow is a heavy
 dependency for turning one logo into 2048 dots.

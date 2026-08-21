@@ -89,8 +89,12 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 
 1. **Text present** → render with the built-in font at native 64 × 32. Crisp, uses
    the full 2:1 cell, and emoji fold to the icon set.
-2. **No text** → dither the bitmap down to 64 × 32 1-bit, through `ec50.image`:
-   luma, box-filtered resample, contrast stretch, then error diffusion. It is
+2. **No text** → reduce the bitmap to 64 × 32 1-bit through `ec50.image`: luma,
+   box-filtered resample, contrast stretch, unsharp, then Otsu's threshold.
+   Otsu rather than error diffusion because Companion buttons are mostly flat
+   colour with a logo or some text on it, and diffusion turns flat colour into
+   noise. `--dither adaptive` suits photographs, the diffusion modes suit
+   continuous tone. It is
    **inverted** on the way, because Companion draws buttons light-on-dark and
    the panel is dark-on-lit — so a bitmap comes out looking like the text the
    cell would otherwise show, not a photographic negative of it.
@@ -98,8 +102,11 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
    Bitmaps are **opt-in** via `--bitmaps`: requesting them costs roughly 8 KB
    per key, some 360 KB for a full 45-cell refresh, for pixels that are usually
    discarded in favour of the text. At the 64 × 32 we ask for, a 12-key page
-   change costs about 16 ms of Atkinson dithering — inside the 25 ms flush
-   window. `--dither bayer` is roughly 3× cheaper if a slow host stutters.
+   change costs about 14 ms — inside the 25 ms flush window. `--dither bayer`
+   is roughly 3× cheaper if a slow host stutters.
+
+   `--prefer-bitmaps` draws the bitmap even when the button also carries text.
+   Text wins by default, which is right for a label and wrong for artwork.
 
    The payload size is taken from its own length rather than trusted: Companion
    is asked for a cell-shaped bitmap but does not promise one, so a length that

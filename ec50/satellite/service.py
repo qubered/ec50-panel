@@ -49,7 +49,7 @@ class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
                  bitmaps=False, blank=P.Colour.DIM, columns=8,
-                 dither="atkinson", prefer_bitmaps=False):
+                 dither="otsu", fit="contain", prefer_bitmaps=False):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -65,6 +65,7 @@ class SatelliteService:
         self.blank = blank
         self.columns = columns
         self.dither = dither
+        self.fit = fit
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
 
@@ -177,7 +178,7 @@ class SatelliteService:
                               f"{self.dither} dithering")
         self.panel.set_bitmap(cell, img.to_cell(
             img.luma_from_rgb(raw), sw, sh,
-            dither=self.dither, fit="cover", invert=True, levels=True))
+            dither=self.dither, fit=self.fit, invert=True, levels=True))
         return True
 
     # -- inward: panel -> Companion ----------------------------------------

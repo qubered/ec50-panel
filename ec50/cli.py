@@ -128,33 +128,44 @@ def cmd_image(panel, args):
 
     cells = [(args.cell, 0, 0)] if args.cell is not None else [
         (P.ASSIGN[r][c], c, r) for r in range(3) for c in range(12)]
-    # One frame spanning every cell it will land on, dithered once. Doing it
-    # per cell would restart the error diffusion at each seam and the joins
-    # would show as a grid of hard edges.
     across = 12 if args.cell is None else 1
     down = 3 if args.cell is None else 1
     fw, fh = P.CELL_W * across, P.CELL_H * down
 
-    frame = img.place(luma, sw, sh, fw, fh, args.fit, pad=0 if args.invert else 255)
+    # One frame for every cell it will land on, thresholded once. Per cell
+    # would restart the error diffusion at each seam and pick a different
+    # threshold for each, so the joins would show as a grid of hard edges.
+    # The picture is scaled on its own and dropped in afterwards, so letterbox
+    # padding never reaches the threshold and cannot become a false border.
+    ox, oy, tw, th = img.fit_box(sw, sh, fw, fh, args.fit)
+    plane = img.resample(luma, sw, sh, tw, th)
     if args.levels:
-        frame = img.autolevel(frame)
-    bits = img.to_bits(frame, fw, fh, args.dither, args.threshold, args.invert)
+        plane = img.autolevel(plane)
+    amount = (args.sharpen if args.sharpen is not None
+              else (1.0 if args.dither in img.THRESHOLDS else 0.0))
+    if amount:
+        plane = img.sharpen(plane, tw, th, amount)
+    bits = img.to_bits(plane, tw, th, args.dither, args.threshold, args.invert)
 
     if args.preview:
-        print(f"{path}  {sw}x{sh} -> {fw}x{fh}  {args.dither}"
+        framed = bytearray(fw * fh)
+        for y in range(max(0, oy), min(fh, oy + th)):
+            for x in range(max(0, ox), min(fw, ox + tw)):
+                framed[y * fw + x] = bits[(y - oy) * tw + (x - ox)]
+        print(f"{path}  {sw}x{sh} -> {tw}x{th} in {fw}x{fh}  {args.dither}"
               f"{', inverted' if args.invert else ''}\n")
-        print(img.preview(bits, fw, fh))
+        print(img.preview(framed, fw, fh))
         return
 
     colour = BLANK_STYLES[args.blank] if args.blank != "dim" else Colour.WHITE
     panel.clear()
     for cell, cx, cy in cells:
-        panel.set_bitmap(cell, img.pack(bits, fw, fh,
-                                        ox=cx * P.CELL_W, oy=cy * P.CELL_H))
+        panel.set_bitmap(cell, img.pack_at(bits, tw, th,
+                                           ox - cx * P.CELL_W, oy - cy * P.CELL_H))
         panel.set_colour(cell, colour)
     panel.flush()
     print(f"drew {path} ({sw}x{sh}) over {len(cells)} cell"
-          f"{'s' if len(cells) != 1 else ''} with {args.dither} dithering.")
+          f"{'s' if len(cells) != 1 else ''}, {args.dither}.")
 
 
 def cmd_satellite(panel, args):
@@ -162,7 +173,7 @@ def cmd_satellite(panel, args):
     SatelliteService(args.host, args.port, panel=panel, init=False,
                      debug=args.debug, bitmaps=args.bitmaps,
                      blank=BLANK_STYLES[args.blank], columns=args.columns,
-                     dither=args.dither,
+                     dither=args.dither, fit=args.fit,
                      prefer_bitmaps=args.prefer_bitmaps).run()
 
 
@@ -229,10 +240,17 @@ def main():
                          "is an image layer")
     ap.add_argument("--dither", choices=img.DITHERS, default=None, metavar="MODE",
                     help="how to reduce greys to ink: " + ", ".join(img.DITHERS)
-                         + ". Default atkinson; bayer is ~3x cheaper if a page "
-                           "change stutters on a slow host.")
+                         + ". Default otsu, which picks the cut that best "
+                           "splits the histogram - flat areas stay flat and "
+                           "shapes stay crisp. Try adaptive for photographs, "
+                           "and the diffusion modes for continuous tone.")
     ap.add_argument("--fit", choices=img.FITS, default="contain",
-                    help="how `image` fills the frame (default contain)")
+                    help="how a picture fills its frame (default contain, which "
+                         "letterboxes rather than cropping)")
+    ap.add_argument("--sharpen", type=float, default=None, metavar="N",
+                    help="unsharp amount before a threshold; puts back the thin "
+                         "strokes the downscale averaged away (default 1.0 for "
+                         "threshold modes, 0 for dithers)")
     ap.add_argument("--cell", type=int, metavar="N",
                     help="draw into one cell 0-44 instead of the whole Assign grid")
     ap.add_argument("--invert", action="store_true",
@@ -245,7 +263,7 @@ def main():
                     help="print `image` to the terminal instead; needs no panel")
     args = ap.parse_args()
     if args.dither is None:
-        args.dither = "atkinson"
+        args.dither = "otsu"
     if args.prefer_bitmaps:
         args.bitmaps = True
 
