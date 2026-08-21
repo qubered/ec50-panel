@@ -114,6 +114,11 @@ class SatelliteService:
         if leds not in LED_MODES:
             raise ValueError(f"leds must be one of {LED_MODES}")
         self.leds = leds
+        # Asking for LED colours needs a Companion new enough to have `leds` in
+        # its layout schema. If it is not, ADD-DEVICE is rejected outright, so
+        # drop the request and register again rather than sitting disconnected.
+        self._ask_leds = leds != "off"
+        self._retrying = False
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
 
@@ -299,7 +304,7 @@ class SatelliteService:
         for surface in self.surfaces:
             self.client.add_device(surface, self.device_ids[surface.key],
                                    self.serial, bitmaps=self.bitmaps,
-                                   columns=self.columns)
+                                   columns=self.columns, leds=self._ask_leds)
             rows, cols = surface.shape(self.columns)
             self.log(f"registered {surface.name} "
                      f"({len(surface.controls)} controls, {cols}x{rows} grid)")
@@ -322,9 +327,21 @@ class SatelliteService:
                         # Companion greets first; register only after that.
                         self._register()
                     elif msg.status == "ERROR" or msg.command == "ERROR":
-                        self.log(f"!! Companion rejected {msg.command}: "
-                                 f"{msg.get('MESSAGE', msg.args)}")
+                        if msg.command == "ADD-DEVICE" and self._ask_leds:
+                            self._ask_leds = False
+                            self._retrying = True
+                            self.log("note: Companion rejected the layout "
+                                     f"({msg.get('MESSAGE', msg.args)}). Most "
+                                     "likely it predates LED colours in the "
+                                     "satellite schema; registering again "
+                                     "without them. Key lamps fall back to "
+                                     "button colour and pressed state.")
+                            self._register()
+                        elif not self._retrying:
+                            self.log(f"!! Companion rejected {msg.command}: "
+                                     f"{msg.get('MESSAGE', msg.args)}")
                     elif msg.command == "ADD-DEVICE" and msg.status == "OK":
+                        self._retrying = False
                         self.client.registered.add(str(msg.get("DEVICEID")))
                     elif msg.command == "LOCKED-STATE":
                         # Only sent to clients declaring PINCODE_LOCK, which we

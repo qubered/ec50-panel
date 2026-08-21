@@ -129,6 +129,11 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
       is the one that is really a feedback: put a feedback on that layer and
       the lamp follows it. The manifest asks for one segment, `mode: simple`,
       on every control that has a lamp.
+
+      `leds` is a recent addition to the satellite layout schema. A Companion
+      that does not know it rejects `ADD-DEVICE` outright, so a rejection is
+      taken as a version signal: the request is dropped and every surface
+      registers again without it, which leaves sources 2 and 3 working.
    2. **The button's background `COLOR`**, for keys with no display. They have
       nowhere else to show it, so it drives the lamp instead: predominantly
       red is red, anything else bright enough is green. The panel has no blue

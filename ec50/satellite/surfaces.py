@@ -21,7 +21,7 @@ from .. import protocol as P
 # Style presets. A control asks for what it can actually show: no bitmap for a
 # key with no display, no LED colours for a key with no lamp. Companion encodes
 # only what is asked for, so the difference is real work saved on every draw.
-def style_presets(bitmaps: bool = False) -> dict:
+def style_presets(bitmaps: bool = False, leds: bool = True) -> dict:
     """The four combinations of display and LED that this panel has.
 
     Bitmaps are off by default. Requesting them costs about 8 KB per key - some
@@ -33,11 +33,15 @@ def style_presets(bitmaps: bool = False) -> dict:
     Gauge, which is how a feedback reaches a lamp that has no display to write
     on. One segment, because the panel has one lamp per key rather than a ring.
     """
-    lamp = {"segments": 1, "mode": "simple"}
+    lamp = {"segments": 1, "mode": "simple"} if leds else None
     lcd = {"colors": "hex", "text": True, "textStyle": True}
     if bitmaps:
         lcd["bitmap"] = {"w": P.CELL_W, "h": P.CELL_H}
     plain = {"colors": "hex", "text": True}
+    if lamp is None:
+        # Older Companions have no `leds` in their manifest schema. Keep the
+        # preset names so the control map does not have to change with them.
+        return {"default": plain, "led": plain, "lcd": lcd, "lcd-led": lcd}
     return {
         "default": plain,
         "led": {**plain, "leds": lamp},
@@ -138,9 +142,10 @@ class Surface:
         return (max(r for _, r, _ in placed) + 1,
                 max(c for _, _, c in placed) + 1)
 
-    def manifest(self, bitmaps: bool = False, columns: int = 8) -> dict:
+    def manifest(self, bitmaps: bool = False, columns: int = 8,
+                 leds: bool = True) -> dict:
         return {
-            "stylePresets": style_presets(bitmaps),
+            "stylePresets": style_presets(bitmaps, leds),
             "controls": {
                 c.id: {"row": r, "column": col,
                        **({} if c.preset == "default" else {"stylePreset": c.preset})}

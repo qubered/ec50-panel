@@ -194,6 +194,9 @@ See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 takes a Gauge style layer's colour if the button has one, falls back to the
 button background for keys with no display, and to the pressed state otherwise.
 
+`leds` is new in the satellite schema; a Companion too old for it rejects the
+layout, which is detected and retried without.
+
 Companion's green "actions running" triangle is not sent over satellite. For
 that exact behaviour, add a Gauge layer to the button and drive it from a
 feedback on `b_actions_running_<page>_<row>_<column>`.
