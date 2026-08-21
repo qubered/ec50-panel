@@ -48,6 +48,10 @@ def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
 # Below this a colour is "off" rather than a very dim something.
 LED_FLOOR = 24
 
+# Companion's own default text colour. In `auto` it means "nobody chose this",
+# so it is treated as no signal rather than as a standing green.
+DEFAULT_TEXT = (255, 255, 255)
+
 LED_MODES = ("auto", "text", "colour", "gauge", "pressed", "off")
 
 
@@ -199,18 +203,24 @@ class SatelliteService:
     def _led_state(self, control, msg) -> int:
         """Decide what a key's lamp should do.
 
-        Three sources, because no single one covers the panel. A Gauge style
-        layer is the honest answer - it is a feedback, it is per key, and it is
-        what Companion sends LEDS for - but no released Companion supports it
-        yet, so `--leds gauge` has to ask. Failing that, a key with no display
-        has nowhere else
-        to show its background colour, so the colour drives the lamp. A key
-        that does have a display shows its colour on the backlight already, so
-        its lamp reports PRESSED instead.
+        In `auto`, each key uses whichever colour channel it is not already
+        spending, so every key has one a feedback can drive:
 
-        `--leds text` overrides all of it with the button's text colour, which
-        is the only per-key colour a feedback can set that this panel is not
-        already using for something else.
+          * no display -> the background colour, since there is no backlight
+            for it to feed
+          * has a display -> the text colour, since the background is on the
+            backlight and the panel draws text as ink and throws the colour
+            away
+
+        Companion's default text colour is white, which would otherwise leave
+        every labelled key standing green, so in `auto` white counts as no
+        signal. Any other colour is a decision and drives the lamp. A key with
+        nothing to report falls back to PRESSED, because a key that lights when
+        pressed beats one that never lights.
+
+        `--leds text` and `--leds colour` force one channel everywhere, white
+        included. `--leds gauge` uses a Gauge style layer, which needs satellite
+        API 1.13.0.
 
         Companion has an `action_running` flag - the green triangle on a button
         - but does not send it over satellite; PRESSED is `pushed`, which is the
@@ -218,16 +228,7 @@ class SatelliteService:
         """
         if self.leds == "off":
             return P.Led.OFF
-        if self.leds == "text":
-            # The panel renders text as ink and throws the colour away, so
-            # TEXTCOLOR is a whole per-key colour channel going spare - and
-            # Companion has sent it since well before the Gauge layer existed.
-            # A feedback that sets the text colour therefore reaches the lamp
-            # on every key, including the ones whose background is already
-            # committed to the backlight.
-            state = led_colour(proto.parse_colour(msg.get("TEXTCOLOR")))
-            if state != P.Led.OFF:
-                return state
+
         if self.leds in ("auto", "gauge"):
             # Only `gauge` asks for these, but obey them wherever they appear:
             # a Companion new enough to send them unprompted should be heard.
@@ -238,13 +239,26 @@ class SatelliteService:
                 return led_colour(gauge)
             if self.leds == "gauge":
                 return P.Led.OFF
-        if self.leds == "colour" or (self.leds == "auto" and not control.has_display):
-            state = led_colour(proto.parse_colour(msg.get("COLOR")))
-            if state != P.Led.OFF or self.leds == "colour":
+
+        if self.leds in ("auto", "text", "colour"):
+            # Use whichever colour channel this key is not already spending.
+            # A key with an LCD puts its background on the backlight, so its
+            # text colour is free - the panel draws text as ink and discards
+            # the colour. A key with no display has no backlight to feed, so
+            # its background is the free one.
+            if self.leds == "colour" or (self.leds == "auto"
+                                         and not control.has_display):
+                rgb = proto.parse_colour(msg.get("COLOR"))
+            else:
+                rgb = proto.parse_colour(msg.get("TEXTCOLOR"))
+                if self.leds == "auto" and rgb == DEFAULT_TEXT:
+                    rgb = None      # Companion's default, not a decision
+            state = led_colour(rgb)
+            if state != P.Led.OFF or self.leds != "auto":
                 return state
-            # A key with no colour to report has nothing to lose by falling
-            # through, and a dark key that still lights when pressed is better
-            # than one that never lights at all.
+            # Nothing to report: a key that still lights when pressed beats
+            # one that never lights at all.
+
         return P.Led.GREEN if msg.flag("PRESSED") else P.Led.OFF
 
     def _warn_once(self, key: str, message: str) -> None:

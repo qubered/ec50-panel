@@ -192,16 +192,25 @@ See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 
 72 keys have a lamp that does red, green or off.
 
-`--leds auto` (the default) uses the button's background colour for keys with
-no display — they have nowhere else to show it — and the pressed state for keys
-that do.
+`--leds auto` (the default) gives every key a colour a feedback can drive, by
+using whichever channel that key is not already spending:
 
-`--leds text` uses the button's **text** colour on every key instead. The panel
-renders text as ink and ignores its colour, so that is a per-key colour channel
-going spare: put a feedback on the text colour and it drives the lamp and
-nothing else. Black reads as off, so make black the resting state. This is the
-only way to drive the lamp of a key that already has an LCD, whose background is
-committed to the backlight.
+| key | drives the lamp | why |
+|---|---|---|
+| Destination, Layer, transport — **LED only** | **background** colour | no backlight for it to feed |
+| Assign, Show Config — **LED + LCD** | **text** colour | background is on the backlight; the panel draws text as ink and discards its colour |
+
+Companion's default text colour is white, so `auto` treats white as *no signal*
+rather than a standing green. Any other colour is a decision and lights the
+lamp. A key with nothing to report falls back to the pressed state, so it still
+lights while held.
+
+Red when the colour is predominantly red, green for anything else bright enough
+— the lamp is two bits, so blue and white both just mean "on". Below 24/255 on
+every channel is off.
+
+`--leds text` and `--leds colour` force one channel everywhere, white included;
+`--leds pressed` and `--leds off` do what they say.
 
 A Gauge style layer's colour is used when the Companion is new enough — that
 needs **satellite API 1.13.0**, which first ships in **Companion 5.1**. The

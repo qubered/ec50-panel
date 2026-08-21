@@ -124,39 +124,27 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 4. **Key LED** — 72 of the 82 keys have a lamp, two bits wide: red, green or
    off. Three sources, in order (`--leds auto|gauge|colour|pressed|off`):
 
-   1. **The button's text colour** (`--leds text`), on every key. The panel
-      renders text as ink and discards its colour, so `TEXTCOLOR` is a whole
-      per-key colour channel going spare — and Companion has sent it since
-      long before the Gauge layer existed, whenever `colors` is requested.
-      A feedback that sets the text colour therefore reaches the lamp and
-      nothing else. Black reads as off, so set black as the resting state.
+   1. **A spare colour channel**, chosen per key so that every key has one a
+      feedback can drive:
 
-      This is the only per-key colour a feedback can drive on a key that
-      already has an LCD, since its background is committed to the backlight.
+      * a key with **no display** uses its **background** colour — there is no
+        backlight for it to feed
+      * a key **with a display** uses its **text** colour — the background is
+        already on the backlight, and the panel draws text as ink and throws
+        the colour away
 
-   1b. **A Gauge style layer**, which needs **satellite API 1.13.0** — added by
-      Companion's "surface gauge leds" change on 2026-07-14 and first shipping
-      in **5.1**. The 5.0.x line reports API 1.12.0 and does not have it: in
-      5.0.x, "Gauge" in the button style editor is a *graphics element* that
-      draws a dial onto the button image, and `SatelliteRenderUtil` sends only
-      `PRESSED`, `TYPE`, `BITMAP`, `COLOR`, `TEXTCOLOR`, `TEXT` and `FONT_SIZE`.
+      `TEXTCOLOR` is sent whenever `colors` is requested, which every preset
+      here does, so this works as far back as the protocol goes. Companion's
+      default text colour is white, which would leave every labelled key
+      standing green, so `auto` reads white as no signal. `--leds text` and
+      `--leds colour` force one channel everywhere, white included.
 
-      This is version gated rather than attempted, because asking a Companion
-      that does not know the field does not degrade — the manifest is validated
-      against a JSON Schema with `"additionalProperties": false`, so it fails
-      whole and the surface never registers. `BEGIN` carries `APIVERSION`, so
-      the check is free, and `auto` turns the feature on by itself the moment a
-      new enough Companion answers. A rejection is still recovered from, as a
-      backstop.
+   2. **`PRESSED`**, for any key the colour had nothing to say about. This
+      reflects Companion's view, so remotely triggered presses light up too.
 
-   2. **The button's background `COLOR`**, for keys with no display. They have
-      nowhere else to show it, so it drives the lamp instead: predominantly
-      red is red, anything else bright enough is green. The panel has no blue
-      lamp, so a blue button reads as simply lit.
-   3. **`PRESSED`**, for keys that do have a display — their colour is already
-      on the backlight — and for any key the first two had nothing to say
-      about. This reflects Companion's view, so remotely triggered presses
-      light up too.
+   The fold is red when the colour is predominantly red and green for anything
+   else at or above 24/255 on some channel. The lamp is two bits, so blue and
+   white both mean simply lit.
 
    Companion also tracks `action_running`, the green triangle it draws on a
    button while its actions execute, but **does not send it over satellite**.
