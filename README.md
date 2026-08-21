@@ -175,11 +175,20 @@ dependency for turning one logo into 2048 dots.
 python -m ec50 satellite --host <companion-ip>
 ```
 
-Registers four surfaces — the three Assign rows separately so Companion can page
-them independently, plus a Control surface for destinations, layers and
-transport. Button text renders on the LCDs, presses reach Companion, the row
-page arrows change that row's page, and the T-bar arrives as a Companion
-variable.
+Registers six surfaces. A Companion surface sits on exactly one page, so every
+band with its own page arrows gets its own — the three Assign rows,
+Destinations and Layers — and its arrows page it and nothing else. The
+transition group, the Show Config keys and the T-bar share the sixth.
+
+| surface | grid at `--columns 8` | paged by |
+|---|---|---|
+| Assign Row 1 / 2 / 3 | 8 × 2 each | its own arrows |
+| Destinations | 8 × 2 | its own arrows |
+| Layers | 8 × 2 | its own arrows |
+| Control | 6 × 3 | — |
+
+Button text renders on the LCDs, presses reach Companion, and the T-bar arrives
+as a Companion variable on the Control surface.
 
 The panel is wider than a Companion page, so controls wrap onto the page grid —
 `--columns 8` (the default) puts an Assign row's first 8 keys on one grid row

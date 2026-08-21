@@ -1,8 +1,10 @@
 """How the EC-50's hardware maps onto Companion surfaces.
 
-Four surfaces over one connection. The three Assign rows are registered
-separately because a Companion surface sits on exactly one page, and
-independent pages per row is the whole point.
+Six surfaces over one connection. A Companion surface sits on exactly one page,
+so every band of the panel that has its own page arrows has to be its own
+surface: the three Assign rows, Destinations, and Layers. What is left - the
+transition group, the Show Config keys and the T-bar - has no arrows and shares
+the last one.
 
 Between them they account for every one of the 82 buttons and all 45 displays,
 exactly once. `python -m ec50 satellite --check` asserts that.
@@ -174,40 +176,62 @@ def _assign_row(row: int) -> Surface:
     )
 
 
+def _destinations() -> Surface:
+    """The 12 Destination keys. Its arrows page it, like an Assign row."""
+    controls = [Control(f"dest/{col}", 0, col, button=_idx(f"DEST_{col}"))
+                for col in range(12)]
+    # Cell 9 sits beside the page arrows, not on a key. Barco files it under
+    # DEST_11, which is an internal association rather than a physical one, so
+    # it is display-only here - put a page-number button on it and it says what
+    # Barco's own software would.
+    controls.append(Control("dest/page", 0, 12, cell=9))
+    return Surface(
+        key="dest",
+        name="EC-50 Destinations",
+        controls=controls,
+        page_up=_idx("DEST_UP"),
+        page_down=_idx("DEST_DOWN"),
+    )
+
+
+def _layers() -> Surface:
+    """BG plus the eight Layer keys, paged by its own arrows."""
+    controls = [Control(f"layer/{col}", 0, col, button=_idx(f"LAYER_{col}"))
+                for col in range(9)]
+    controls.append(Control("layer/page", 0, 9, cell=10))
+    return Surface(
+        key="layer",
+        name="EC-50 Layers",
+        controls=controls,
+        page_up=_idx("LAYER_UP"),
+        page_down=_idx("LAYER_DOWN"),
+    )
+
+
 def _control_surface() -> Surface:
-    controls: list[Control] = []
+    """Everything that is not a paged row: the transition group and the four
+    Show Config keys, plus the T-bar.
 
-    # Row 0 - destinations, their page arrows, and the page display beside them.
-    for col in range(12):
-        controls.append(Control(f"dest/{col}", 0, col, button=_idx(f"DEST_{col}")))
-    controls.append(Control("dest/up", 0, 12, button=_idx("DEST_UP")))
-    controls.append(Control("dest/down", 0, 13, button=_idx("DEST_DOWN")))
-    # Cells 9 and 10 sit beside the page arrows, not on a key. Barco's CSV files
-    # them under DEST_11 and LAYER_8, which is an internal association rather
-    # than a physical one, so they are display-only here.
-    controls.append(Control("dest/page", 0, 14, cell=9))
-
-    # Row 1 - layers, their page arrows, and the freeze/arm group.
-    for col in range(9):
-        controls.append(Control(f"layer/{col}", 1, col, button=_idx(f"LAYER_{col}")))
-    controls.append(Control("layer/up", 1, 9, button=_idx("LAYER_UP")))
-    controls.append(Control("layer/down", 1, 10, button=_idx("LAYER_DOWN")))
-    controls.append(Control("layer/page", 1, 11, cell=10))
-    controls.append(Control("freeze/pgm", 1, 12, button=_idx("FREEZE_PGM")))
-    controls.append(Control("freeze/pvw", 1, 13, button=_idx("FREEZE_PVW")))
-    controls.append(Control("arm", 1, 14, button=_idx("ARM")))
-
-    # Row 2 - transition group and the four show-config keys, which do have LCDs.
-    row2 = [
-        ("match", "MATCH"), ("trans/layer", "LAYER_TRANS"), ("cut/layer", "LAYER_CUT"),
-        ("cut", "CUT"), ("trans/all", "ALL_TRANS"),
+    Grouped by the physical clusters they form on the panel, and `wrap` starts
+    a fresh grid row at each one, so they stay separate on a Companion page.
+    """
+    groups = [
+        # The coloured pairs beside the Layer row.
+        [("freeze/pgm", "FREEZE_PGM"), ("freeze/pvw", "FREEZE_PVW"),
+         ("trans/layer", "LAYER_TRANS"), ("cut/layer", "LAYER_CUT"),
+         ("arm", "ARM"), ("match", "MATCH")],
+        # The red pair under the Show Config block.
+        [("cut", "CUT"), ("trans/all", "ALL_TRANS")],
     ]
-    for col, (cid, name) in enumerate(row2):
-        controls.append(Control(cid, 2, col, button=_idx(name)))
+    controls: list[Control] = []
+    for row, group in enumerate(groups):
+        for col, (cid, name) in enumerate(group):
+            controls.append(Control(cid, row, col, button=_idx(name)))
+    # The Show Config keys, which do have displays.
     for i, name in enumerate(("SHOW_CFG_0_0", "SHOW_CFG_0_1",
                               "SHOW_CFG_1_0", "SHOW_CFG_1_1")):
         cid = "cfg/" + name[len("SHOW_CFG_"):].replace("_", "-")
-        controls.append(Control(cid, 2, 5 + i, button=_idx(name), cell=_cell(name)))
+        controls.append(Control(cid, 2, i, button=_idx(name), cell=_cell(name)))
 
     return Surface(
         key="control",
@@ -223,7 +247,8 @@ def _control_surface() -> Surface:
 
 
 def build() -> list[Surface]:
-    return [_assign_row(0), _assign_row(1), _assign_row(2), _control_surface()]
+    return [_assign_row(0), _assign_row(1), _assign_row(2),
+            _destinations(), _layers(), _control_surface()]
 
 
 def check(surfaces: list[Surface]) -> list[str]:

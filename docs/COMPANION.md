@@ -4,24 +4,30 @@ Turns the EC-50 into surfaces in [Bitfocus Companion](https://bitfocus.io/compan
 over the [Satellite protocol](https://companion.free/for-developers/Satellite-API/),
 TCP port 16622.
 
-## Why four surfaces
+## Why six surfaces
 
-A Companion surface sits on exactly one page. Independent pages per Assign row
-therefore means one `ADD-DEVICE` per row — three registrations over a single TCP
-connection, each appearing separately in Companion's Surfaces table. Everything
-else shares a fourth.
+A Companion surface sits on exactly one page. So every band of the panel that
+has its own page arrows has to be its own surface — otherwise the arrows would
+all page the same thing, which is the opposite of what they are for. That is
+five: the three Assign rows, Destinations, and Layers. What is left has no
+arrows and shares the sixth.
 
-| Surface | Device ID | Controls | Grid at `--columns 8` |
-|---|---|---|---|
-| Assign Row 1 | `ec50-<serial>-row1` | 13 | 8 × 2 |
-| Assign Row 2 | `ec50-<serial>-row2` | 13 | 8 × 2 |
-| Assign Row 3 | `ec50-<serial>-row3` | 13 | 8 × 2 |
-| Control | `ec50-<serial>-control` | 39 | 8 × 6 |
+All six register over a single TCP connection and appear separately in
+Companion's Surfaces table.
+
+| Surface | Device ID | Controls | Grid at `--columns 8` | Pages |
+|---|---|---|---|---|
+| Assign Row 1 | `ec50-<serial>-row1` | 13 | 8 × 2 | own arrows |
+| Assign Row 2 | `ec50-<serial>-row2` | 13 | 8 × 2 | own arrows |
+| Assign Row 3 | `ec50-<serial>-row3` | 13 | 8 × 2 | own arrows |
+| Destinations | `ec50-<serial>-dest` | 13 | 8 × 2 | own arrows |
+| Layers | `ec50-<serial>-layer` | 10 | 8 × 2 | own arrows |
+| Control | `ec50-<serial>-control` | 12 | 6 × 3 | — |
 
 `<serial>` comes from the FTDI EEPROM (e.g. `PE4662-029`), so surfaces persist
 across restarts and two panels on one host don't collide.
 
-The four surfaces account for **all 82 buttons and all 45 displays**, with
+The six surfaces account for **all 82 buttons and all 45 displays**, with
 nothing orphaned and nothing invented.
 
 ## Wrapping onto the page grid
@@ -59,7 +65,7 @@ declaration order; actual row/column comes from the wrap above.
 | 12 | `label` | `ASSIGN_n_LABEL` | cell 11 / 14 / 17 |
 
 **The page arrows are not Companion controls.** `ADD-DEVICE` declares
-`CAN_CHANGE_PAGE`, and pressing `ASSIGN_n_UP` / `_DOWN` sends
+`CAN_CHANGE_PAGE`, and pressing any of the ten arrow keys sends
 `CHANGE-PAGE DEVICEID=… DIRECTION=…`, which pages that surface directly. That is
 what those keys are for physically, and it keeps two columns free.
 
@@ -68,20 +74,40 @@ The row's `label` control drives the LCD beside the arrows. Put a Companion
 shows its live page — row 1 reads `Pg 70`. That is exactly what Barco's own
 software puts on those displays (`Preset` / `Pg 2` in the captures).
 
-### Control surface
+### Destinations and Layers
 
-| Row | Columns |
-|---|---|
-| 0 | `dest/0`…`dest/11`, `dest/up`, `dest/down`, `dest/page`* |
-| 1 | `layer/0`…`layer/8`, `layer/up`, `layer/down`, `layer/page`*, `freeze/pgm`, `freeze/pvw`, `arm` |
-| 2 | `match`, `trans/layer`, `cut/layer`, `cut`, `trans/all`, `cfg/0-0`, `cfg/0-1`, `cfg/1-0`, `cfg/1-1` |
+Laid out exactly like an Assign row, and paged the same way — `DEST_UP` /
+`DEST_DOWN` and `LAYER_UP` / `LAYER_DOWN` send `CHANGE-PAGE` for their own
+surface rather than being controls.
+
+| Surface | Row 0 | Row 1 |
+|---|---|---|
+| Destinations | `dest/0`…`dest/7` | `dest/8`…`dest/11`, `dest/page`* |
+| Layers | `layer/0`…`layer/7` | `layer/8`, `layer/page`* |
 
 \* `dest/page` (cell 9) and `layer/page` (cell 10) are **display-only** — those
 LCDs sit beside the page arrows, not on a key, so no `KEY-PRESS` is ever sent for
 them. Barco's CSV files them under `DEST_11` and `LAYER_8`; that is an internal
-association, not a physical one.
+association, not a physical one. Put a page-number button there and the display
+tracks the surface's page, exactly as the Assign rows' label keys do.
 
-`cfg/*` carry cells 12, 13, 15 and 16.
+`layer/0` is the green BG key; `layer/1`…`layer/8` are the keys Barco prints as
+`1/9` … `8/16`.
+
+### Control surface
+
+Everything with no page arrows of its own, grouped by the clusters they form on
+the panel — `wrap` starts a fresh grid row at each, so they stay apart.
+
+| Row | Columns |
+|---|---|
+| 0 | `freeze/pgm`, `freeze/pvw`, `trans/layer`, `cut/layer`, `arm`, `match` |
+| 1 | `cut`, `trans/all` |
+| 2 | `cfg/0-0`, `cfg/0-1`, `cfg/1-0`, `cfg/1-1` |
+
+The four `cfg` keys carry cells 12, 13, 15 and 16. The T-bar is declared here.
+
+
 
 ## Rendering
 
@@ -198,7 +224,7 @@ and cheap, so they can go more often.
 flush queue and drain on the next poll. That is what makes the single-threaded
 loop safe.
 
-Reconnection: exponential backoff, re-register all four surfaces on connect,
+Reconnection: exponential backoff, re-register all six surfaces on connect,
 blank the panel while disconnected.
 
 ## Companion-side setup
@@ -210,9 +236,10 @@ blank the panel while disconnected.
    widening — controls wrap to fit — but the width must agree or they will land
    in the wrong places.
 3. Add the Satellite connection if not already listening on 16622.
-4. Assign each Assign row surface to its page.
-5. Tick "Let the panel's page arrows change page" in each row surface's
-   settings; `CHANGE-PAGE` is ignored until you do.
+4. Assign each of the five paged surfaces — the three Assign rows,
+   Destinations and Layers — to its page.
+5. Tick "Let the panel's page arrows change page" in each of their settings;
+   `CHANGE-PAGE` is ignored until you do.
 
 ## Modules
 
@@ -220,7 +247,7 @@ blank the panel while disconnected.
 ec50/satellite/
     protocol.py   line encode/decode, base64 fields, quoting
     client.py     TCP client, reconnect, ADD-DEVICE registration
-    surfaces.py   the four surface definitions and their button/cell/LED maps
+    surfaces.py   the six surface definitions and their button/cell/LED maps
     service.py    the event loop
 ```
 
@@ -257,7 +284,7 @@ taken from the docs:
 ```
 ec50/satellite/
     protocol.py   line encode/decode, base64 fields, colour parsing
-    surfaces.py   the four surface definitions, plus check() for the mapping
+    surfaces.py   the six surface definitions, plus check() for the mapping
     client.py     non-blocking TCP client, reconnect, registration
     service.py    the event loop
 ```
