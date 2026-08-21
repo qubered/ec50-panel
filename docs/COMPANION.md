@@ -121,9 +121,29 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
    **white** when its colour would come out black; an empty key falls back to
    dim (`--blank off|dim|white`). Barco's own software does the same: `0x57`
    dim white for a blank button, `0xFF` bright white for a labelled one.
-4. **Key LED** ← `PRESSED` from `KEY-STATE`: green while Companion holds the
-   button active, off otherwise. This reflects Companion's view, so remotely
-   triggered presses light up too.
+4. **Key LED** — 72 of the 82 keys have a lamp, two bits wide: red, green or
+   off. Three sources, in order (`--leds auto|gauge|colour|pressed|off`):
+
+   1. **A Gauge style layer.** Set a button style layer's usage to Gauge and
+      Companion sends its colour as `LEDS`, raw RGB per segment, base64. This
+      is the one that is really a feedback: put a feedback on that layer and
+      the lamp follows it. The manifest asks for one segment, `mode: simple`,
+      on every control that has a lamp.
+   2. **The button's background `COLOR`**, for keys with no display. They have
+      nowhere else to show it, so it drives the lamp instead: predominantly
+      red is red, anything else bright enough is green. The panel has no blue
+      lamp, so a blue button reads as simply lit.
+   3. **`PRESSED`**, for keys that do have a display — their colour is already
+      on the backlight — and for any key the first two had nothing to say
+      about. This reflects Companion's view, so remotely triggered presses
+      light up too.
+
+   Companion also tracks `action_running`, the green triangle it draws on a
+   button while its actions execute, but **does not send it over satellite**.
+   `PRESSED` is `pushed`, which is the closest thing the protocol carries. To
+   get the real one, put a Gauge layer on the button and drive it from a
+   feedback on the internal variable
+   `b_actions_running_<page>_<row>_<column>`.
 
 Controls with no display (`page/up`, `dest/0`…) ignore bitmaps entirely; their
 `stylePreset` omits bitmaps so Companion never encodes them.

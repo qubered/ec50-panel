@@ -178,7 +178,7 @@ def cmd_satellite(panel, args):
                      debug=args.debug, bitmaps=args.bitmaps,
                      blank=BLANK_STYLES[args.blank], columns=args.columns,
                      dither=args.dither, fit=args.fit, polarity=args.polarity,
-                     prefer_bitmaps=args.prefer_bitmaps).run()
+                     prefer_bitmaps=args.prefer_bitmaps, leds=args.leds).run()
 
 
 def cmd_vegas(panel, args):
@@ -238,6 +238,13 @@ def main():
                     help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",
                     help="also request button bitmaps as a fallback for keys with no text")
+    ap.add_argument("--leds", choices=("auto", "gauge", "colour", "pressed", "off"),
+                    default="auto", metavar="MODE",
+                    help="what the key lamps report: gauge (a Companion style "
+                         "layer whose usage is Gauge), colour (the button's "
+                         "background), pressed, or off. Default auto - gauge "
+                         "when there is one, otherwise colour for keys with no "
+                         "display and pressed for keys that have one.")
     ap.add_argument("--prefer-bitmaps", action="store_true",
                     help="draw the bitmap even when the button also has text "
                          "(implies --bitmaps); use it for buttons whose style "

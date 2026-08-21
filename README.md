@@ -188,6 +188,16 @@ size.
 
 See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 
+### Key LEDs
+
+72 keys have a lamp that does red, green or off. `--leds auto` (the default)
+takes a Gauge style layer's colour if the button has one, falls back to the
+button background for keys with no display, and to the pressed state otherwise.
+
+Companion's green "actions running" triangle is not sent over satellite. For
+that exact behaviour, add a Gauge layer to the button and drive it from a
+feedback on `b_actions_running_<page>_<row>_<column>`.
+
 ## Status
 
 Working and confirmed on hardware: displays, colour, LEDs, all 82 buttons,

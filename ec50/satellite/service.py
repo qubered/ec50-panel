@@ -45,11 +45,55 @@ def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
     return P.colour(r, g, b)
 
 
+# Below this a colour is "off" rather than a very dim something.
+LED_FLOOR = 24
+
+LED_MODES = ("auto", "gauge", "colour", "pressed", "off")
+
+
+def led_colour(rgb) -> int:
+    """Map a Companion colour onto the panel's two-colour lamp.
+
+    The lamp is two bits and does red, green or nothing, so this is a fold
+    rather than a conversion: red when the colour is predominantly red, green
+    for anything else bright enough to count as lit. Blue and white have no
+    lamp of their own and come out green, which is what "the LED is on" means
+    on hardware that cannot do blue.
+    """
+    if not rgb:
+        return P.Led.OFF
+    r, g, b = rgb
+    if max(r, g, b) < LED_FLOOR:
+        return P.Led.OFF
+    return P.Led.RED if (r > g and r > b) else P.Led.GREEN
+
+
+def gauge_colour(payload):
+    """Average a LEDS payload down to one colour, or None if there isn't one.
+
+    LEDS is raw RGB per segment, base64, and never follows the negotiated
+    bitmap format. One segment is asked for, but average whatever arrives:
+    a ring would otherwise be represented by whichever segment came first.
+    """
+    if not payload:
+        return None
+    import base64
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except Exception:
+        return None
+    n = len(data) // 3
+    if n == 0:
+        return None
+    return tuple(sum(data[i * 3 + c] for i in range(n)) // n for c in range(3))
+
+
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
                  bitmaps=False, blank=P.Colour.DIM, columns=8,
-                 dither="auto", fit="contain", polarity="auto", prefer_bitmaps=False):
+                 dither="auto", fit="contain", polarity="auto",
+                 prefer_bitmaps=False, leds="auto"):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -67,6 +111,9 @@ class SatelliteService:
         self.dither = dither
         self.fit = fit
         self.polarity = polarity
+        if leds not in LED_MODES:
+            raise ValueError(f"leds must be one of {LED_MODES}")
+        self.leds = leds
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
 
@@ -142,9 +189,43 @@ class SatelliteService:
             self._dirty_display = True
 
         if control.button is not None:
-            self.panel.set_led(control.button,
-                               P.Led.GREEN if msg.flag("PRESSED") else P.Led.OFF)
+            self.panel.set_led(control.button, self._led_state(control, msg))
             self._dirty_leds = True
+
+    def _led_state(self, control, msg) -> int:
+        """Decide what a key's lamp should do.
+
+        Three sources, because no single one covers the panel. A Gauge style
+        layer is the honest answer - it is a feedback, it is per key, and it is
+        what Companion sends LEDS for - but it only exists if the user has put
+        one on the button. Failing that, a key with no display has nowhere else
+        to show its background colour, so the colour drives the lamp. A key
+        that does have a display shows its colour on the backlight already, so
+        its lamp reports PRESSED instead.
+
+        Companion has an `action_running` flag - the green triangle on a button
+        - but does not send it over satellite; PRESSED is `pushed`, which is the
+        closest thing available. A Gauge layer fed from the internal variable
+        `b_actions_running_<page>_<row>_<col>` gets the real thing.
+        """
+        if self.leds == "off":
+            return P.Led.OFF
+        if self.leds in ("auto", "gauge"):
+            gauge = gauge_colour(msg.get("LEDS"))
+            if gauge is not None and max(gauge) >= LED_FLOOR:
+                self._warn_once("gauge", "a Gauge style layer is driving the key "
+                                         "lamps")
+                return led_colour(gauge)
+            if self.leds == "gauge":
+                return P.Led.OFF
+        if self.leds == "colour" or (self.leds == "auto" and not control.has_display):
+            state = led_colour(proto.parse_colour(msg.get("COLOR")))
+            if state != P.Led.OFF or self.leds == "colour":
+                return state
+            # A key with no colour to report has nothing to lose by falling
+            # through, and a dark key that still lights when pressed is better
+            # than one that never lights at all.
+        return P.Led.GREEN if msg.flag("PRESSED") else P.Led.OFF
 
     def _warn_once(self, key: str, message: str) -> None:
         """Say something the first time only. The panel loop runs at 300 Hz."""

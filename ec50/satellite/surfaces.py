@@ -18,21 +18,33 @@ from dataclasses import dataclass, field
 
 from .. import protocol as P
 
-# Style presets. Controls with no display ask for nothing but colour, so
-# Companion never spends time encoding bitmaps we would throw away.
+# Style presets. A control asks for what it can actually show: no bitmap for a
+# key with no display, no LED colours for a key with no lamp. Companion encodes
+# only what is asked for, so the difference is real work saved on every draw.
 def style_presets(bitmaps: bool = False) -> dict:
-    """Controls with no display ask for colour only, so Companion never spends
-    time encoding pixels we would discard.
+    """The four combinations of display and LED that this panel has.
 
     Bitmaps are off by default. Requesting them costs about 8 KB per key - some
     360 KB for a full 45-cell refresh - and the built-in font renders better on
     a 2:1 monochrome cell than a downscaled square anyway. `--bitmaps` turns on
     the fallback for buttons that carry artwork instead of text.
+
+    `leds` asks Companion for the colour of a style layer whose usage is set to
+    Gauge, which is how a feedback reaches a lamp that has no display to write
+    on. One segment, because the panel has one lamp per key rather than a ring.
     """
+    lamp = {"segments": 1, "mode": "simple"}
     lcd = {"colors": "hex", "text": True, "textStyle": True}
     if bitmaps:
         lcd["bitmap"] = {"w": P.CELL_W, "h": P.CELL_H}
-    return {"default": {"colors": "hex", "text": True}, "lcd": lcd}
+    plain = {"colors": "hex", "text": True}
+    return {
+        "default": plain,
+        "led": {**plain, "leds": lamp},
+        "lcd": lcd,
+        "lcd-led": {**lcd, "leds": lamp},
+    }
+
 
 _NAME_TO_INDEX = {info[0]: idx for idx, info in P.BUTTON_INFO.items()}
 
@@ -57,6 +69,18 @@ class Control:
     @property
     def has_display(self) -> bool:
         return self.cell is not None
+
+    @property
+    def has_led(self) -> bool:
+        """72 of the 82 keys have a lamp; the ten page arrows do not."""
+        entry = P.BUTTON_INFO.get(self.button)
+        return bool(entry) and entry[2] != 0xFFFF
+
+    @property
+    def preset(self) -> str:
+        if self.has_display:
+            return "lcd-led" if self.has_led else "lcd"
+        return "led" if self.has_led else "default"
 
 
 @dataclass
@@ -119,7 +143,7 @@ class Surface:
             "stylePresets": style_presets(bitmaps),
             "controls": {
                 c.id: {"row": r, "column": col,
-                       **({"stylePreset": "lcd"} if c.has_display else {})}
+                       **({} if c.preset == "default" else {"stylePreset": c.preset})}
                 for c, r, col in self.wrap(columns)
             },
         }
