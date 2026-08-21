@@ -5,6 +5,7 @@
     python -m ec50 clear                    blank everything
     python -m ec50 text CAM1 CAM2 WIDE      label keys left to right
     python -m ec50 grid                     label R1C1 .. R3C12
+    python -m ec50 image logo.png           a picture across the Assign grid
     python -m ec50 watch                    key events and T-bar
     python -m ec50 test                     press a key, it lights up
     python -m ec50 vegas                    colour and LED light show
@@ -19,7 +20,7 @@ import math
 import sys
 import time
 
-from . import protocol as P
+from . import image as img, protocol as P
 from .panel import EC50
 from .protocol import Colour, Led
 from .transport import TransportError, default_backend
@@ -115,11 +116,53 @@ def cmd_test(panel, args):
         print("\npanel cleared. stopped.")
 
 
+def cmd_image(panel, args):
+    """Dither a picture onto the Assign grid, or onto one cell."""
+    if not args.labels:
+        sys.exit("error: give me a PNG or PGM/PPM to draw")
+    path = args.labels[0]
+    try:
+        sw, sh, luma = img.load(path)
+    except (OSError, ValueError) as e:
+        sys.exit(f"error: {e}")
+
+    cells = [(args.cell, 0, 0)] if args.cell is not None else [
+        (P.ASSIGN[r][c], c, r) for r in range(3) for c in range(12)]
+    # One frame spanning every cell it will land on, dithered once. Doing it
+    # per cell would restart the error diffusion at each seam and the joins
+    # would show as a grid of hard edges.
+    across = 12 if args.cell is None else 1
+    down = 3 if args.cell is None else 1
+    fw, fh = P.CELL_W * across, P.CELL_H * down
+
+    frame = img.place(luma, sw, sh, fw, fh, args.fit, pad=0 if args.invert else 255)
+    if args.levels:
+        frame = img.autolevel(frame)
+    bits = img.to_bits(frame, fw, fh, args.dither, args.threshold, args.invert)
+
+    if args.preview:
+        print(f"{path}  {sw}x{sh} -> {fw}x{fh}  {args.dither}"
+              f"{', inverted' if args.invert else ''}\n")
+        print(img.preview(bits, fw, fh))
+        return
+
+    colour = BLANK_STYLES[args.blank] if args.blank != "dim" else Colour.WHITE
+    panel.clear()
+    for cell, cx, cy in cells:
+        panel.set_bitmap(cell, img.pack(bits, fw, fh,
+                                        ox=cx * P.CELL_W, oy=cy * P.CELL_H))
+        panel.set_colour(cell, colour)
+    panel.flush()
+    print(f"drew {path} ({sw}x{sh}) over {len(cells)} cell"
+          f"{'s' if len(cells) != 1 else ''} with {args.dither} dithering.")
+
+
 def cmd_satellite(panel, args):
     from .satellite.service import SatelliteService
     SatelliteService(args.host, args.port, panel=panel, init=False,
                      debug=args.debug, bitmaps=args.bitmaps,
-                     blank=BLANK_STYLES[args.blank], columns=args.columns).run()
+                     blank=BLANK_STYLES[args.blank], columns=args.columns,
+                     dither=args.dither).run()
 
 
 def cmd_vegas(panel, args):
@@ -151,6 +194,7 @@ COMMANDS = {
     "satellite": cmd_satellite,
     "info": cmd_info, "clear": cmd_clear, "text": cmd_text, "grid": cmd_grid,
     "watch": cmd_watch, "test": cmd_test, "vegas": cmd_vegas,
+    "image": cmd_image,
 }
 
 
@@ -158,7 +202,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=sorted(COMMANDS))
-    ap.add_argument("labels", nargs="*", help="labels for the `text` command")
+    ap.add_argument("labels", nargs="*",
+                    help="labels for `text`, or an image file for `image`")
     ap.add_argument("--backend", choices=("d2xx", "pyftdi"),
                     help="force a USB backend instead of the platform default")
     ap.add_argument("--index", type=int, help="device index if several are attached")
@@ -177,7 +222,28 @@ def main():
                     help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",
                     help="also request button bitmaps as a fallback for keys with no text")
+    ap.add_argument("--dither", choices=img.DITHERS, default=None, metavar="MODE",
+                    help="how to reduce greys to ink: " + ", ".join(img.DITHERS)
+                         + ". Default atkinson; bayer is ~3x cheaper if a page "
+                           "change stutters on a slow host.")
+    ap.add_argument("--fit", choices=img.FITS, default="contain",
+                    help="how `image` fills the frame (default contain)")
+    ap.add_argument("--cell", type=int, metavar="N",
+                    help="draw into one cell 0-44 instead of the whole Assign grid")
+    ap.add_argument("--invert", action="store_true",
+                    help="ink where the source is light, not dark")
+    ap.add_argument("--levels", action="store_true",
+                    help="stretch contrast to the full range before dithering")
+    ap.add_argument("--threshold", type=int, default=128, metavar="N",
+                    help="cut point for --dither none (default 128)")
+    ap.add_argument("--preview", action="store_true",
+                    help="print `image` to the terminal instead; needs no panel")
     args = ap.parse_args()
+    if args.dither is None:
+        args.dither = "atkinson"
+
+    if args.command == "image" and args.preview:
+        return cmd_image(None, args)          # no hardware needed to look at it
 
     try:
         panel = EC50.open(args.backend, args.index, skew=0 if args.no_skew else None)

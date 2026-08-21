@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 
-from .. import protocol as P
+from .. import image as img, protocol as P
 from ..panel import EC50
 from . import protocol as proto
 from . import surfaces as S
@@ -48,7 +48,8 @@ def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
 class SatelliteService:
     def __init__(self, host, port=proto.DEFAULT_PORT, panel=None,
                  backend=None, logger=print, init=False, debug=False,
-                 bitmaps=False, blank=P.Colour.DIM, columns=8):
+                 bitmaps=False, blank=P.Colour.DIM, columns=8,
+                 dither="atkinson"):
         self.log = logger
         self.panel: EC50 = panel or EC50.open(backend)
         if init:
@@ -63,6 +64,7 @@ class SatelliteService:
         self.bitmaps = bitmaps
         self.blank = blank
         self.columns = columns
+        self.dither = dither
         self._lock_warned = False
         self.device_ids = {s.key: f"ec50-{self.serial}-{s.key}" for s in self.surfaces}
         self.by_device = {self.device_ids[s.key]: s for s in self.surfaces}
@@ -129,24 +131,24 @@ class SatelliteService:
             self._dirty_leds = True
 
     def _draw_bitmap(self, cell, msg):
-        """Fallback when a button has no text: threshold the bitmap to 1bpp."""
+        """Fallback when a button has no text: dither the bitmap to 1bpp.
+
+        Inverted, because Companion draws buttons light-on-dark and the panel
+        is the other way round - so a bitmap comes out looking like the text
+        the cell would otherwise be showing, not a photographic negative of it.
+        """
         import base64
         try:
             raw = base64.b64decode(msg.get("BITMAP"))
         except Exception:
             return
-        px = len(raw) // 3
-        if px == 0:
+        dims = img.guess_dims(len(raw))
+        if dims is None:
             return
-        side = int(px ** 0.5) or 1
-        self.panel.clear_cell(cell)
-        for y in range(P.CELL_H):
-            sy = min(side - 1, y * side // P.CELL_H)
-            for x in range(P.CELL_W):
-                sx = min(side - 1, x * side // P.CELL_W)
-                i = (sy * side + sx) * 3
-                if i + 2 < len(raw) and (raw[i] + raw[i + 1] + raw[i + 2]) > 383:
-                    self.panel.set_pixel(cell, x, y)
+        sw, sh = dims
+        self.panel.set_bitmap(cell, img.to_cell(
+            img.luma_from_rgb(raw), sw, sh,
+            dither=self.dither, fit="cover", invert=True, levels=True))
 
     # -- inward: panel -> Companion ----------------------------------------
 

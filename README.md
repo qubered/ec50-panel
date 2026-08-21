@@ -36,6 +36,8 @@ python -m ec50 grid      # label every key R1C1 .. R3C12
 python -m ec50 test      # press a key, it lights up
 python -m ec50 watch     # key events and T-bar
 python -m ec50 vegas     # colour and LED light show
+python -m ec50 image pic.png --preview   # dither a picture, no panel needed
+python -m ec50 image pic.png             # ... and put it on the Assign grid
 ```
 
 Add `--init` after a power cycle. Add `--backend d2xx|pyftdi` to force one.
@@ -69,6 +71,8 @@ need debouncing.
 | `panel.text(row, col, s, colour)` | label an Assign key, rows 0–2, cols 0–11 |
 | `panel.set_cell_text(cell, s, colour)` | label any of the 45 cells |
 | `panel.set_bitmap(cell, data)` | raw 256-byte 64×32 1bpp image |
+| `image.load(path)` → `(w, h, luma)` | read a PNG or binary PGM/PPM |
+| `image.to_cell(luma, w, h, ...)` | dither a picture to a 256-byte cell |
 | `panel.set_colour(cell, value)` | backlight colour |
 | `panel.led_at(row, col, state)` / `set_led(index, state)` | key LED |
 | `panel.flush()` | push and latch |
@@ -113,6 +117,33 @@ Documented properly in [docs/PROTOCOL.md](docs/PROTOCOL.md), but the short list:
   FTDI driver binding; replacing it stops the Toolset seeing the panel.
 - **The panel's CPLD is field-programmable over the same link.** Nothing here
   goes near that path, and nothing should.
+
+## Pictures
+
+The cells are one bit deep, so a photograph has to be reduced to ink or nothing.
+`ec50.image` does it in three steps — luma, box-filtered resample, then dither —
+and the dither is what makes it work. A plain threshold throws away every mid
+tone; error diffusion scatters the quantisation error into the neighbours that
+have not been decided yet, so grey survives as texture.
+
+```bash
+python -m ec50 image logo.png                      # across the whole Assign grid
+python -m ec50 image logo.png --cell 5             # into one cell
+python -m ec50 image logo.png --preview            # to the terminal instead
+python -m ec50 image photo.png --dither floyd --levels --fit cover
+```
+
+`--dither atkinson|floyd|bayer|none` (default `atkinson`, which throws away part
+of the error on purpose — clipping to solid black and white reads better on a
+64 × 32 cell than a faithful mush). `--fit contain|cover|stretch`, `--levels` to
+stretch contrast first, `--invert` for ink where the source is light.
+
+Spanning the grid dithers one 768 × 96 frame and then cuts it into cells, rather
+than dithering each cell separately — otherwise the error diffusion restarts at
+every seam and the joins show as a grid of hard edges.
+
+Reading a PNG needs nothing but the standard library; Pillow is a heavy
+dependency for turning one logo into 2048 dots.
 
 ## Companion
 
