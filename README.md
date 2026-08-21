@@ -195,7 +195,9 @@ The panel is wider than a Companion page, so controls wrap onto the page grid �
 and the remaining 4 plus its label on the next. Match it to Settings → Grid
 size.
 
-See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
+See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup, and
+[docs/EC-FAMILY.md](docs/EC-FAMILY.md) for what supporting the EC-30 and EC-40
+would take — Barco's own files say the protocol is shared.
 
 ### Key LEDs
 
