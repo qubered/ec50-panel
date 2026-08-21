@@ -22,6 +22,22 @@ DEFAULT_PORT = 16622
 # CHANGE-PAGE and CONFIG_FIELDS arrived in 1.10.0; the page arrows depend on it.
 MIN_API_VERSION = (1, 10, 0)
 
+# `leds` in the layout schema arrived in 1.13.0, with Companion's "surface gauge
+# leds" change. Before that the manifest is validated against a JSON Schema with
+# additionalProperties:false, so asking does not degrade - it fails the whole
+# manifest and the surface never registers. Hence the version gate rather than
+# trying and recovering.
+LEDS_API_VERSION = (1, 13, 0)
+
+
+def parse_version(text) -> tuple:
+    """`'1.13.0'` -> `(1, 13, 0)`. Anything unparseable sorts lowest."""
+    parts = []
+    for chunk in str(text or "").split(".")[:3]:
+        digits = "".join(c for c in chunk if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts + [0] * (3 - len(parts)))
+
 
 @dataclass
 class Message:

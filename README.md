@@ -203,11 +203,12 @@ nothing else. Black reads as off, so make black the resting state. This is the
 only way to drive the lamp of a key that already has an LCD, whose background is
 committed to the backlight.
 
-`--leds gauge` asks for a Gauge style layer's colour. **No Companion release
-supports this** — the field exists only on `main`, and in 5.0.x the "Gauge" in
-the style editor is a graphics element drawn onto the button image, not
-something reported to satellite. The rejection is detected and retried without,
-so trying it costs nothing.
+A Gauge style layer's colour is used when the Companion is new enough — that
+needs **satellite API 1.13.0**, which first ships in **Companion 5.1**. The
+5.0.x line reports 1.12.0 and does not have it: there, "Gauge" in the style
+editor is a graphics element drawn onto the button image, not something
+reported to satellite. `auto` checks the version at connect and turns it on by
+itself, so nothing needs changing when you upgrade.
 
 Companion's green "actions running" triangle is not sent over satellite. For
 that exact behaviour, add a Gauge layer to the button and drive it from a

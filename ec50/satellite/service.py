@@ -114,12 +114,9 @@ class SatelliteService:
         if leds not in LED_MODES:
             raise ValueError(f"leds must be one of {LED_MODES}")
         self.leds = leds
-        # `leds` is not in any released Companion - 5.0.3, the newest as of
-        # writing, validates the manifest against a JSON Schema with
-        # additionalProperties:false, so the field is rejected outright and
-        # takes the whole surface with it. Asking is therefore opt-in. A
-        # Companion that sends LEDS unprompted is still obeyed below.
-        self._ask_leds = leds == "gauge"
+        # Whether to ask for LED colours is decided at BEGIN, once the
+        # Companion's satellite API version is known.
+        self._ask_leds = False
         self._retrying = False
         self.prefer_bitmaps = prefer_bitmaps
         self._warned: set[str] = set()
@@ -319,6 +316,15 @@ class SatelliteService:
     # -- loop --------------------------------------------------------------
 
     def _register(self):
+        want = self.leds in ("auto", "gauge")
+        self._ask_leds = want and self.client.supports(proto.LEDS_API_VERSION)
+        if self.leds == "gauge" and not self._ask_leds:
+            need = ".".join(str(n) for n in proto.LEDS_API_VERSION)
+            self._warn_once("ledsapi",
+                            f"satellite API {self.client.api_version} has no LED "
+                            f"colours in its layout schema; that needs {need} "
+                            "(Companion 5.1). Key lamps use the button colour "
+                            "and pressed state instead.")
         for surface in self.surfaces:
             self.client.add_device(surface, self.device_ids[surface.key],
                                    self.serial, bitmaps=self.bitmaps,
@@ -349,11 +355,9 @@ class SatelliteService:
                             self._ask_leds = False
                             self._retrying = True
                             self.log("note: Companion rejected the layout "
-                                     f"({msg.get('MESSAGE', msg.args)}) - this "
-                                     "build has no `leds` in its satellite "
-                                     "schema. Registering again without it; "
-                                     "key lamps fall back to button colour and "
-                                     "pressed state.")
+                                     f"({msg.get('MESSAGE', msg.args)}) despite "
+                                     "reporting an API that should accept LED "
+                                     "colours. Registering again without them.")
                             self._register()
                         elif not self._retrying:
                             self.log(f"!! Companion rejected {msg.command}: "

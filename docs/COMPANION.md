@@ -134,17 +134,20 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
       This is the only per-key colour a feedback can drive on a key that
       already has an LCD, since its background is committed to the backlight.
 
-   1b. **A Gauge style layer** (`--leds gauge`), which **no Companion release
-      supports**. The `leds` manifest field exists only on `main`; 5.0.3, the
-      newest release, validates `LAYOUT_MANIFEST` against
-      `assets/satellite-surface.schema.json`, whose style preset carries
-      `"additionalProperties": false` — so the field fails the whole manifest
-      with `Invalid LAYOUT_MANIFEST` and the surface never registers. In 5.0.x
-      "Gauge" in the button style editor is a *graphics element* that draws a
-      dial onto the button image; it is not reported to satellite at all.
+   1b. **A Gauge style layer**, which needs **satellite API 1.13.0** — added by
+      Companion's "surface gauge leds" change on 2026-07-14 and first shipping
+      in **5.1**. The 5.0.x line reports API 1.12.0 and does not have it: in
+      5.0.x, "Gauge" in the button style editor is a *graphics element* that
+      draws a dial onto the button image, and `SatelliteRenderUtil` sends only
+      `PRESSED`, `TYPE`, `BITMAP`, `COLOR`, `TEXTCOLOR`, `TEXT` and `FONT_SIZE`.
 
-      The rejection is recovered from rather than fatal, and `LEDS` is obeyed
-      wherever it appears, so this costs nothing to try on a dev build.
+      This is version gated rather than attempted, because asking a Companion
+      that does not know the field does not degrade — the manifest is validated
+      against a JSON Schema with `"additionalProperties": false`, so it fails
+      whole and the surface never registers. `BEGIN` carries `APIVERSION`, so
+      the check is free, and `auto` turns the feature on by itself the moment a
+      new enough Companion answers. A rejection is still recovered from, as a
+      backstop.
 
    2. **The button's background `COLOR`**, for keys with no display. They have
       nowhere else to show it, so it drives the lamp instead: predominantly

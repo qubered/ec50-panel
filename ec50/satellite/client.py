@@ -151,8 +151,12 @@ class SatelliteClient:
             if msg.command == "BEGIN":
                 self.api_version = str(msg.get("APIVERSION") or "?")
                 self.companion_version = str(msg.get("COMPANIONVERSION") or "?")
+                gauge = ("yes" if self.supports(proto.LEDS_API_VERSION)
+                         else f"no, needs API "
+                              + ".".join(str(n) for n in proto.LEDS_API_VERSION))
                 self.log(f"Companion {self.companion_version}, "
-                         f"satellite API {self.api_version}")
+                         f"satellite API {self.api_version} "
+                         f"(Gauge LED colours: {gauge})")
             elif msg.command == "PING":
                 # Companion echoes the payload back on PONG; do the same for it.
                 self.send_raw(f"PONG {msg.status or ''}".rstrip())
@@ -161,6 +165,14 @@ class SatelliteClient:
                 continue
             out.append(msg)
         return out
+
+    @property
+    def api(self) -> tuple:
+        return proto.parse_version(self.api_version)
+
+    def supports(self, minimum: tuple) -> bool:
+        """Whether the connected Companion is at least this satellite API."""
+        return self.api >= minimum
 
     # -- registration ------------------------------------------------------
 
