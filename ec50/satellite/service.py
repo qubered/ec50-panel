@@ -48,7 +48,7 @@ def backlight(rgb, has_content: bool, blank: int = P.Colour.DIM) -> int:
 # Below this a colour is "off" rather than a very dim something.
 LED_FLOOR = 24
 
-LED_MODES = ("auto", "gauge", "colour", "pressed", "off")
+LED_MODES = ("auto", "text", "colour", "gauge", "pressed", "off")
 
 
 def led_colour(rgb) -> int:
@@ -211,13 +211,26 @@ class SatelliteService:
         that does have a display shows its colour on the backlight already, so
         its lamp reports PRESSED instead.
 
+        `--leds text` overrides all of it with the button's text colour, which
+        is the only per-key colour a feedback can set that this panel is not
+        already using for something else.
+
         Companion has an `action_running` flag - the green triangle on a button
         - but does not send it over satellite; PRESSED is `pushed`, which is the
-        closest thing available. A Gauge layer fed from the internal variable
-        `b_actions_running_<page>_<row>_<col>` gets the real thing.
+        closest thing available.
         """
         if self.leds == "off":
             return P.Led.OFF
+        if self.leds == "text":
+            # The panel renders text as ink and throws the colour away, so
+            # TEXTCOLOR is a whole per-key colour channel going spare - and
+            # Companion has sent it since well before the Gauge layer existed.
+            # A feedback that sets the text colour therefore reaches the lamp
+            # on every key, including the ones whose background is already
+            # committed to the backlight.
+            state = led_colour(proto.parse_colour(msg.get("TEXTCOLOR")))
+            if state != P.Led.OFF:
+                return state
         if self.leds in ("auto", "gauge"):
             # Only `gauge` asks for these, but obey them wherever they appear:
             # a Companion new enough to send them unprompted should be heard.

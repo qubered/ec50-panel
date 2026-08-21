@@ -124,22 +124,28 @@ Request `TEXT=true`, `TEXT_STYLE=true`, `COLORS=hex`, and a small bitmap.
 4. **Key LED** — 72 of the 82 keys have a lamp, two bits wide: red, green or
    off. Three sources, in order (`--leds auto|gauge|colour|pressed|off`):
 
-   1. **A Gauge style layer**, if `--leds gauge` asks for it. Set a button
-      style layer's usage to Gauge and Companion sends its colour as `LEDS`,
-      raw RGB per segment, base64. This is the one that is really a feedback:
-      put a feedback on that layer and the lamp follows it.
+   1. **The button's text colour** (`--leds text`), on every key. The panel
+      renders text as ink and discards its colour, so `TEXTCOLOR` is a whole
+      per-key colour channel going spare — and Companion has sent it since
+      long before the Gauge layer existed, whenever `colors` is requested.
+      A feedback that sets the text colour therefore reaches the lamp and
+      nothing else. Black reads as off, so set black as the resting state.
 
-      **No released Companion supports this yet.** `leds` exists only on
-      `main`; 5.0.3, the newest release, validates `LAYOUT_MANIFEST` against
+      This is the only per-key colour a feedback can drive on a key that
+      already has an LCD, since its background is committed to the backlight.
+
+   1b. **A Gauge style layer** (`--leds gauge`), which **no Companion release
+      supports**. The `leds` manifest field exists only on `main`; 5.0.3, the
+      newest release, validates `LAYOUT_MANIFEST` against
       `assets/satellite-surface.schema.json`, whose style preset carries
-      `"additionalProperties": false` — so the field is not ignored, it fails
-      the whole manifest with `Invalid LAYOUT_MANIFEST` and the surface never
-      registers. That is why asking is opt-in rather than the default.
+      `"additionalProperties": false` — so the field fails the whole manifest
+      with `Invalid LAYOUT_MANIFEST` and the surface never registers. In 5.0.x
+      "Gauge" in the button style editor is a *graphics element* that draws a
+      dial onto the button image; it is not reported to satellite at all.
 
-      A rejection is recovered from rather than fatal: the request is dropped
-      and every surface registers again without it. And `LEDS` is obeyed
-      wherever it appears, so a Companion new enough to send it unprompted
-      works without the flag.
+      The rejection is recovered from rather than fatal, and `LEDS` is obeyed
+      wherever it appears, so this costs nothing to try on a dev build.
+
    2. **The button's background `COLOR`**, for keys with no display. They have
       nowhere else to show it, so it drives the lamp instead: predominantly
       red is red, anything else bright enough is green. The panel has no blue

@@ -190,12 +190,24 @@ See [docs/COMPANION.md](docs/COMPANION.md) for the mapping and setup.
 
 ### Key LEDs
 
-72 keys have a lamp that does red, green or off. `--leds auto` (the default)
-takes a Gauge style layer's colour if the button has one, falls back to the
-button background for keys with no display, and to the pressed state otherwise.
+72 keys have a lamp that does red, green or off.
 
-`leds` is new in the satellite schema; a Companion too old for it rejects the
-layout, which is detected and retried without.
+`--leds auto` (the default) uses the button's background colour for keys with
+no display — they have nowhere else to show it — and the pressed state for keys
+that do.
+
+`--leds text` uses the button's **text** colour on every key instead. The panel
+renders text as ink and ignores its colour, so that is a per-key colour channel
+going spare: put a feedback on the text colour and it drives the lamp and
+nothing else. Black reads as off, so make black the resting state. This is the
+only way to drive the lamp of a key that already has an LCD, whose background is
+committed to the backlight.
+
+`--leds gauge` asks for a Gauge style layer's colour. **No Companion release
+supports this** — the field exists only on `main`, and in 5.0.x the "Gauge" in
+the style editor is a graphics element drawn onto the button image, not
+something reported to satellite. The rejection is detected and retried without,
+so trying it costs nothing.
 
 Companion's green "actions running" triangle is not sent over satellite. For
 that exact behaviour, add a Gauge layer to the button and drive it from a

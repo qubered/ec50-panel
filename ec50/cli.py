@@ -238,15 +238,18 @@ def main():
                     help="backlight for keys with nothing on them (default dim)")
     ap.add_argument("--bitmaps", action="store_true",
                     help="also request button bitmaps as a fallback for keys with no text")
-    ap.add_argument("--leds", choices=("auto", "gauge", "colour", "pressed", "off"),
+    ap.add_argument("--leds",
+                    choices=("auto", "text", "colour", "gauge", "pressed", "off"),
                     default="auto", metavar="MODE",
                     help="what the key lamps report. Default auto: the button's "
                          "background colour for keys with no display, pressed "
-                         "state for keys that have one. `gauge` additionally "
-                         "asks Companion for the colour of a style layer whose "
-                         "usage is Gauge, which needs a build newer than 5.0.3; "
-                         "on anything older the layout is rejected and it falls "
-                         "back to auto. Also colour, pressed, off.")
+                         "state for keys that have one. `text` uses the button's "
+                         "TEXT colour on every key - the panel renders text as "
+                         "ink and ignores its colour, so a feedback that sets it "
+                         "reaches the lamp and nothing else. `colour` uses the "
+                         "background everywhere. `gauge` asks for a Gauge style "
+                         "layer, which no Companion release supports yet. Also "
+                         "pressed, off.")
     ap.add_argument("--prefer-bitmaps", action="store_true",
                     help="draw the bitmap even when the button also has text "
                          "(implies --bitmaps); use it for buttons whose style "
